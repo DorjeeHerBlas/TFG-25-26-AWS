@@ -1,0 +1,1 @@
+C:\UCM\AWS\TFG-25-26-AWS\AWS-2D-UNITY-GAME\Library\Bee\artifacts\WinPlayerBuildProgram\il2cppOutput\cpp
