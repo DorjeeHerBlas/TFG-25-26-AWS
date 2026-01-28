@@ -40,6 +40,20 @@ public class LoginController : MonoBehaviour
     private TMP_Text errorText;
 
     [System.Serializable]
+    public class AuthenticationResult
+    {
+        public string IdToken;
+        public string AccessToken;
+        public string RefreshToken;
+    }
+
+    [System.Serializable]
+    public class LoginResponse
+    {
+        public AuthenticationResult AuthenticationResult;
+    }
+
+    [System.Serializable]
     public class SignUpAttribute
     {
         public string Name;
@@ -190,7 +204,17 @@ public class LoginController : MonoBehaviour
         if (request.result == UnityWebRequest.Result.Success)
         {
             Debug.Log("Login Exitoso: " + request.downloadHandler.text);
-            // Recibo el IdToken y AccessToken. TO DO guardarlos.
+            
+            // Extracción de tokens del JSON de respuesta
+            LoginResponse response = JsonUtility.FromJson<LoginResponse>(request.downloadHandler.text);
+
+            // Guardamos el IdToken, AccessToken, Username y RefreshToken en PlayerPrefs (Persistencia)
+            PlayerPrefs.SetString("CognitoIdToken", response.AuthenticationResult.IdToken);
+            PlayerPrefs.SetString("CognitoAccessToken", response.AuthenticationResult.AccessToken);
+            PlayerPrefs.SetString("CognitoUsername", USERNAME);
+            PlayerPrefs.SetString("CognitoRefreshToken", response.AuthenticationResult.RefreshToken);
+            PlayerPrefs.Save();
+
             if (!string.IsNullOrEmpty(goToScene))
             {
                 SceneManager.LoadScene(goToScene);
@@ -200,6 +224,52 @@ public class LoginController : MonoBehaviour
         {
             Debug.LogError("Error en Login " + request.responseCode + ": " + request.downloadHandler.text);
             if (errorText != null) errorText.text = "Error en Login " + request.responseCode + ": " + request.downloadHandler.text;
+        }
+    }
+
+    // TO DO Se tiene que llamar cuando salte el error 401 al mandar datos, ahora mismo a la hora se dejaría de poder mandar datos
+    // CORRUTINA PARA REFRESCAR LA SESIÓN
+    IEnumerator RefreshSession()
+    {
+        // Recuperamos los datos guardados
+        string savedUsername = PlayerPrefs.GetString("CognitoUsername");
+        string refreshToken = PlayerPrefs.GetString("CognitoRefreshToken");
+
+        LoginSendData sendData = new LoginSendData();
+        sendData.AuthFlow = "REFRESH_TOKEN_AUTH"; // Flujo especial para renovar
+        sendData.ClientId = CLIENTID;
+        sendData.AuthParameters = new AuthParameters
+        {
+            // IMPORTANTE: Para el refresh, el campo se llama REFRESH_TOKEN
+            // Usaremos una clase auxiliar si el JSON falla, pero Cognito suele aceptar esto:
+            USERNAME = savedUsername,
+            SECRET_HASH = CalculateSecretHash(HASH, savedUsername, CLIENTID)
+        };
+
+        // El Refresh Token se envía fuera de AuthParameters en algunos flujos o dentro según versión
+        // Para USER_PASSWORD_AUTH con Refresh:
+        string json = "{\"AuthFlow\":\"REFRESH_TOKEN_AUTH\",\"ClientId\":\"" + CLIENTID + "\",\"AuthParameters\":{\"REFRESH_TOKEN\":\"" + refreshToken + "\",\"SECRET_HASH\":\"" + sendData.AuthParameters.SECRET_HASH + "\"}}";
+
+        byte[] bytePostData = Encoding.UTF8.GetBytes(json);
+        UnityWebRequest request = new UnityWebRequest("https://cognito-idp.eu-north-1.amazonaws.com", "POST");
+        request.uploadHandler = new UploadHandlerRaw(bytePostData);
+        request.downloadHandler = new DownloadHandlerBuffer();
+        request.SetRequestHeader("Content-Type", "application/x-amz-json-1.1");
+        request.SetRequestHeader("X-Amz-Target", "AWSCognitoIdentityProviderService.InitiateAuth");
+
+        yield return request.SendWebRequest();
+
+        if (request.result == UnityWebRequest.Result.Success)
+        {
+            LoginResponse response = JsonUtility.FromJson<LoginResponse>(request.downloadHandler.text);
+            PlayerPrefs.SetString("CognitoIdToken", response.AuthenticationResult.IdToken);
+            PlayerPrefs.Save();
+            Debug.Log("Token renovado con éxito.");
+        }
+        else
+        {
+            Debug.LogError("Error renovando token. El usuario debe loguearse otra vez.");
+            Logout();
         }
     }
 
@@ -215,6 +285,14 @@ public class LoginController : MonoBehaviour
             byte[] hashBytes = hmac.ComputeHash(messageBytes);
             return System.Convert.ToBase64String(hashBytes);
         }
+    }
+
+    // Método para cerrar sesión manualmente
+    public void Logout()
+    {
+        PlayerPrefs.DeleteKey("CognitoIdToken");
+        PlayerPrefs.DeleteKey("CognitoAccessToken");
+        SceneManager.LoadScene("LoginScene");
     }
 
     // METODOS PARA PASAR TEXTOS DESDE INPUT FIELDS
@@ -246,5 +324,15 @@ public class LoginController : MonoBehaviour
     public void ConfSignUp()
     {
         StartCoroutine(ConfirmSignUp());
+    }
+
+    void Start()
+    {
+        // Al iniciar, si ya existe un token, saltamos el login directamente
+        if (PlayerPrefs.HasKey("CognitoIdToken"))
+        {
+            StartCoroutine(RefreshSession());
+            if (!string.IsNullOrEmpty(goToScene)) SceneManager.LoadScene(goToScene);
+        }
     }
 }
