@@ -16,20 +16,22 @@ https://www.youtube.com/watch?v=dNqzWIbHFAQ https://medium.com/better-programmin
 
 public class LoginController : MonoBehaviour
 {
+    [SerializeField]
+    private bool token = false;
     // ID del app client del user pool
-    const string CLIENTID = "657u1sl26h05ungaonv258qq13";
+    const string CLIENTID = "4rka5dogcs4k6k2v1epfnkc87j";
 
     // nombre del username, tiene que ser el correo al que llegara el codigo de verificacion
     string USERNAME;
 
     // client secret, en apartado app clients
-    const string HASH = "mp2tmd0pjjog60gu9bpbqp4tdva27sfsap9m859mmdijdpkijpn";
+    const string HASH = "1thmvsd85jv4573jak4h125tlhbbe9smv1qnav5bl76864892a0v";
     
     // codigo de verificacion que llega al correo
     string CODE;
 
     // preferred_username
-    string NICKNAME = "user_test_123";
+    string NICKNAME;
 
     // contraseña
     string PASSWORD;
@@ -64,6 +66,7 @@ public class LoginController : MonoBehaviour
     public class SignUpSendData
     {
         public string Username;
+        public string Email;
         public string Password;
         public string ClientId;
         public string SecretHash;
@@ -73,6 +76,7 @@ public class LoginController : MonoBehaviour
     [System.Serializable]
     public class ConfirmSignUpSendData
     {
+        public string Email;
         public string Username;
         public string ConfirmationCode;
         public string ClientId;
@@ -99,7 +103,8 @@ public class LoginController : MonoBehaviour
     IEnumerator SignUp()
     {
         SignUpSendData sendData = new SignUpSendData();
-        sendData.Username = USERNAME;
+        sendData.Username = NICKNAME;
+        sendData.Email = USERNAME;
         sendData.Password = PASSWORD; 
         sendData.ClientId = CLIENTID;
         sendData.UserAttributes = new List<SignUpAttribute>();
@@ -147,10 +152,10 @@ public class LoginController : MonoBehaviour
     IEnumerator ConfirmSignUp()
     {
         ConfirmSignUpSendData sendData = new ConfirmSignUpSendData();
-        sendData.Username = USERNAME;
+        sendData.Email = USERNAME;
         sendData.ConfirmationCode = CODE;
         sendData.ClientId = CLIENTID;
-
+        sendData.Username = NICKNAME;
         string clientSecret = HASH;
         sendData.SecretHash = CalculateSecretHash(clientSecret, sendData.Username, sendData.ClientId);
 
@@ -306,11 +311,18 @@ public class LoginController : MonoBehaviour
         USERNAME = email.text;
         Debug.Log(USERNAME);
     }
+    public void SetNickname(TMP_InputField nick)
+    {
+        NICKNAME = nick.text;
+        Debug.Log(USERNAME);
+    }
     public void SetCode(TMP_InputField verCode)
     {
         CODE = verCode.text;
         Debug.Log(CODE);
     }
+
+
 
     // METODOS PARA INICIAR LAS CORRUTINAS
     public void SendCode()
@@ -328,11 +340,15 @@ public class LoginController : MonoBehaviour
 
     void Start()
     {
-        // Al iniciar, si ya existe un token, saltamos el login directamente
-        if (PlayerPrefs.HasKey("CognitoIdToken"))
+        if (token)
         {
-            StartCoroutine(RefreshSession());
-            if (!string.IsNullOrEmpty(goToScene)) SceneManager.LoadScene(goToScene);
+            // Al iniciar, si ya existe un token, saltamos el login directamente
+            if (PlayerPrefs.HasKey("CognitoIdToken"))
+            {
+                StartCoroutine(RefreshSession());
+                if (!string.IsNullOrEmpty(goToScene)) SceneManager.LoadScene(goToScene);
+            }
         }
+        
     }
 }
