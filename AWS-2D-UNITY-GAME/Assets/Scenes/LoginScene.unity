@@ -4849,7 +4849,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 45170f818a5aa334e8da7977fdd6c2d7, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::LoginController
-  token: 0
+  token: 1
   goToScene: SCENE
   errorText: {fileID: 838655785}
 --- !u!4 &1804304501

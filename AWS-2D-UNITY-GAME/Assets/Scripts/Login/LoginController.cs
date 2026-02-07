@@ -345,6 +345,7 @@ public class LoginController : MonoBehaviour
             // Al iniciar, si ya existe un token, saltamos el login directamente
             if (PlayerPrefs.HasKey("CognitoIdToken"))
             {
+                errorText.text = "Automatic Login";
                 StartCoroutine(RefreshSession());
                 if (!string.IsNullOrEmpty(goToScene)) SceneManager.LoadScene(goToScene);
             }
