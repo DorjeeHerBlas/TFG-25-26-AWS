@@ -33,7 +33,7 @@ public class LoginController : MonoBehaviour
     // preferred_username
     string NICKNAME;
 
-    // contraseña
+    // contraseï¿½a
     string PASSWORD;
 
     [SerializeField]
@@ -185,6 +185,11 @@ public class LoginController : MonoBehaviour
     // CORRUTINA PARA INICIAR SESION, TIENE QUE EXISTIR EL USUARIO
     IEnumerator SignIn()
     {
+        if (DynamoDBManager.Instance != null)
+        {
+            DynamoDBManager.Instance.SignOutAWS();
+        }
+
         LoginSendData sendData = new LoginSendData();
         sendData.ClientId = CLIENTID;
         sendData.AuthParameters = new AuthParameters
@@ -210,7 +215,7 @@ public class LoginController : MonoBehaviour
         {
             Debug.Log("Login Exitoso: " + request.downloadHandler.text);
             
-            // Extracción de tokens del JSON de respuesta
+            // Extracciï¿½n de tokens del JSON de respuesta
             LoginResponse response = JsonUtility.FromJson<LoginResponse>(request.downloadHandler.text);
 
             // Guardamos el IdToken, AccessToken, Username y RefreshToken en PlayerPrefs (Persistencia)
@@ -232,8 +237,8 @@ public class LoginController : MonoBehaviour
         }
     }
 
-    // TO DO Se tiene que llamar cuando salte el error 401 al mandar datos, ahora mismo a la hora se dejaría de poder mandar datos
-    // CORRUTINA PARA REFRESCAR LA SESIÓN
+    // TO DO Se tiene que llamar cuando salte el error 401 al mandar datos, ahora mismo a la hora se dejarï¿½a de poder mandar datos
+    // CORRUTINA PARA REFRESCAR LA SESIï¿½N
     IEnumerator RefreshSession()
     {
         // Recuperamos los datos guardados
@@ -251,7 +256,7 @@ public class LoginController : MonoBehaviour
             SECRET_HASH = CalculateSecretHash(HASH, savedUsername, CLIENTID)
         };
 
-        // El Refresh Token se envía fuera de AuthParameters en algunos flujos o dentro según versión
+        // El Refresh Token se envï¿½a fuera de AuthParameters en algunos flujos o dentro segï¿½n versiï¿½n
         // Para USER_PASSWORD_AUTH con Refresh:
         string json = "{\"AuthFlow\":\"REFRESH_TOKEN_AUTH\",\"ClientId\":\"" + CLIENTID + "\",\"AuthParameters\":{\"REFRESH_TOKEN\":\"" + refreshToken + "\",\"SECRET_HASH\":\"" + sendData.AuthParameters.SECRET_HASH + "\"}}";
 
@@ -269,7 +274,7 @@ public class LoginController : MonoBehaviour
             LoginResponse response = JsonUtility.FromJson<LoginResponse>(request.downloadHandler.text);
             PlayerPrefs.SetString("CognitoIdToken", response.AuthenticationResult.IdToken);
             PlayerPrefs.Save();
-            Debug.Log("Token renovado con éxito.");
+            Debug.Log("Token renovado con ï¿½xito.");
         }
         else
         {
@@ -292,11 +297,22 @@ public class LoginController : MonoBehaviour
         }
     }
 
-    // Método para cerrar sesión manualmente
-    public void Logout()
+    // Mï¿½todo para cerrar sesiï¿½n manualmente
+public void Logout()
     {
+        // 1. Limpiar tus PlayerPrefs (lo que ya tenÃ­as)
         PlayerPrefs.DeleteKey("CognitoIdToken");
         PlayerPrefs.DeleteKey("CognitoAccessToken");
+        PlayerPrefs.DeleteKey("CognitoUsername");
+        PlayerPrefs.DeleteKey("CognitoRefreshToken");
+        
+        // 2. NUEVO: Limpiar la cachÃ© interna del SDK de AWS
+        if (DynamoDBManager.Instance != null)
+        {
+            DynamoDBManager.Instance.SignOutAWS();
+        }
+
+        Debug.Log("SesiÃ³n cerrada completamente.");
         SceneManager.LoadScene("LoginScene");
     }
 
@@ -340,6 +356,7 @@ public class LoginController : MonoBehaviour
 
     void Start()
     {
+       //PlayerPrefs.DeleteAll();
         if (token)
         {
             // Al iniciar, si ya existe un token, saltamos el login directamente

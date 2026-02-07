@@ -3,12 +3,15 @@ using System.Collections.Generic;
 using System.IO;
 using UnityEngine;
 using TMPro;
+using UnityEngine.InputSystem;
 
 public class SessionTelemetryRecorder : MonoBehaviour
 {
     [Header("Refs")]
     public JumpComponent playerJump;     // para contar SOLO saltos reales
     public TMP_Text debugText;           // opcional: mostrar métricas en UI
+    public ScoreComponent statsManager;
+    public DynamoDBManager dbManager;   // referencia al manager para guardar en la nube
 
     [Header("Save")]
     public bool autosave = true;
@@ -45,23 +48,41 @@ public class SessionTelemetryRecorder : MonoBehaviour
 
     private float startRealtime;
 
-    void Start()
+void Start()
     {
         startRealtime = Time.realtimeSinceStartup;
 
+        // Inicializar datos vacíos
         data = new SessionTelemetry
         {
             sessionId = Guid.NewGuid().ToString("N"),
             startedAtUtc = DateTime.UtcNow.ToString("o"),
-            lastSavedAtUtc = "",
-            notes = ""
+            score = 0,
+            timePlayedSeconds = 0
         };
 
-        if (playerJump != null)
-            playerJump.OnJump += OnRealJump;
+        if (DynamoDBManager.Instance != null)
+        {
+            // Pedimos los datos a la nube
+            DynamoDBManager.Instance.LoadData((puntosNube, tiempoNube) => 
+            {
+                // ESTO SE EJECUTA CUANDO AWS RESPONDE
+                // Sobrescribimos tus datos locales con los de la nube
+                data.score = puntosNube;
+                
+                // Si quieres continuar el tiempo acumulado:
+                // data.timePlayedSeconds = tiempoNube;
+                
+                // IMPORTANTE: Ajustamos el reloj interno para que no se reinicie
+                // (Si no haces esto, al sumar tiempo nuevo podrías perder el viejo)
+                // startRealtime -= tiempoNube; 
+                
+                Debug.Log("Progreso restaurado de la nube.");
+            });
+        }
 
+        if (playerJump != null) playerJump.OnJump += OnRealJump;
         nextAutosaveTime = Time.realtimeSinceStartup + autosaveEverySeconds;
-
         UpdateDerivedStats();
         UpdateDebugUI();
     }
@@ -83,6 +104,12 @@ public class SessionTelemetryRecorder : MonoBehaviour
         {
             nextAutosaveTime = Time.realtimeSinceStartup + autosaveEverySeconds;
             SaveToDisk();
+        }
+
+         if (Keyboard.current != null &&
+            Keyboard.current.spaceKey.wasPressedThisFrame)
+        {
+            dbManager.SaveGameData(data.score, data.timePlayedSeconds);
         }
     }
 
@@ -175,6 +202,24 @@ public void SaveToDisk()
 #else
     Debug.LogWarning("SaveToDisk skipped: writing to project root is editor-only.");
 #endif
+    if (DynamoDBManager.Instance != null)
+        {
+            int finalScore = data.score;
+            float finalTime = data.timePlayedSeconds;
+
+            // Si tenemos el manager conectado, usamos los DATOS TOTALES REALES
+            if (statsManager != null)
+            {
+                finalScore = statsManager.score;
+                finalTime = statsManager.totalTimeAccumulated;
+            }
+
+            DynamoDBManager.Instance.SaveGameData(finalScore, finalTime);
+        }
+        else
+        {
+            Debug.LogWarning("DynamoDBManager no encontrado.");
+        }
 }
 
 public string GetSavePath()
