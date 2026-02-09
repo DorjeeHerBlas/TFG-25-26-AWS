@@ -556,7 +556,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: cadcae3753fc768408ffe9c9badbfaab, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::CheckHash
-  textaco: {fileID: 76970851}
+  hashtext: {fileID: 76970851}
 --- !u!224 &732658441 stripped
 RectTransform:
   m_CorrespondingSourceObject: {fileID: 6624572974661516149, guid: fe1de83c5e45b47e182f558aef79457b, type: 3}

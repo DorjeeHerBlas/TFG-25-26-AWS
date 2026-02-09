@@ -696,7 +696,13 @@ MonoBehaviour:
     - line: '|   XboxOneOverrideIdentityName: '
     - line: '|   XboxOneOverrideIdentityPublisher: '
     - line: '|   vrEditorSettings: {}'
-    - line: '|   cloudServicesEnabled: {}'
+    - line: '|   cloudServicesEnabled:'
+    - line: '|     Build: 0'
+    - line: '|     Game Performance: 0'
+    - line: '|     Legacy Analytics: 0'
+    - line: '|     Purchasing: 0'
+    - line: '|     UDP: 0'
+    - line: '|     Unity Ads: 0'
     - line: '|   luminIcon:'
     - line: '|     m_Name: '
     - line: '|     m_ModelFolderPath: '
@@ -718,11 +724,11 @@ MonoBehaviour:
     - line: '|   captureStartupLogs: {}'
     - line: '|   activeInputHandler: 1'
     - line: '|   windowsGamepadBackendHint: 0'
-    - line: '|   cloudProjectId: 69ca89f6-8797-4e6b-853d-85f2395a1045'
+    - line: '|   cloudProjectId: 257a39ab-63cf-4d10-87eb-18b372d85ace'
     - line: '|   framebufferDepthMemorylessMode: 0'
     - line: '|   qualitySettingsNames: []'
     - line: '|   projectName: AWS-2D-UNITY-GAME'
-    - line: '|   organizationId: dorjeekhampa97'
+    - line: '|   organizationId: albpenal'
     - line: '|   cloudEnabled: 0'
     - line: '|   legacyClampBlendShapeWeights: 0'
     - line: '|   hmiLoadingImage: {instanceID: 0}'
@@ -741,10 +747,10 @@ MonoBehaviour:
     - rid: 2387553724361605188
       type: {class: WindowsPlatformSettings, ns: UnityEditor.WindowsStandalone, asm: UnityEditor.WindowsStandalone.Extensions}
       data:
-        m_Development: 0
+        m_Development: 1
         m_ConnectProfiler: 0
         m_BuildWithDeepProfilingSupport: 0
-        m_AllowDebugging: 0
+        m_AllowDebugging: 1
         m_WaitForManagedDebugger: 0
         m_ManagedDebuggerFixedPort: 0
         m_ExplicitNullChecks: 0

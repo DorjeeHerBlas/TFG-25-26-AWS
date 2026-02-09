@@ -682,11 +682,11 @@ PlayerSettings:
   captureStartupLogs: {}
   activeInputHandler: 1
   windowsGamepadBackendHint: 0
-  cloudProjectId: 69ca89f6-8797-4e6b-853d-85f2395a1045
+  cloudProjectId: 257a39ab-63cf-4d10-87eb-18b372d85ace
   framebufferDepthMemorylessMode: 0
   qualitySettingsNames: []
   projectName: AWS-2D-UNITY-GAME
-  organizationId: dorjeekhampa97
+  organizationId: albpenal
   cloudEnabled: 0
   legacyClampBlendShapeWeights: 0
   hmiLoadingImage: {fileID: 0}

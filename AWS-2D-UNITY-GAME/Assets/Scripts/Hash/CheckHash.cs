@@ -1,3 +1,4 @@
+using System;
 using System.Collections;
 using System.IO;
 using System.Security.Cryptography;
@@ -11,6 +12,7 @@ public class CheckHash : MonoBehaviour
     public TMP_Text hashtext;
     public string GetExecutableHash()
     {
+#if UNITY_EDITOR
         // Obtiene la ruta del ejecutable actual
         string filePath = System.Diagnostics.Process.GetCurrentProcess().MainModule.FileName;
 
@@ -22,14 +24,34 @@ public class CheckHash : MonoBehaviour
                 return System.BitConverter.ToString(hashBytes).Replace("-", "").ToLower();
             }
         }
+#else
+    // Build (Windows)
+    string exePath = Application.dataPath.Replace("_Data", ".exe");
+
+    if (!File.Exists(exePath))
+    {
+        Debug.LogError("No se encuentra el exe: " + exePath);
+        return null;
     }
+
+    using (var sha256 = SHA256.Create())
+    using (var stream = File.OpenRead(exePath))
+    {
+        byte[] hash = sha256.ComputeHash(stream);
+        return BitConverter.ToString(hash).Replace("-", "").ToLower();
+    }
+#endif
+    }
+
+
+
 
     public IEnumerator CheckVersion()
     {
         string url = "https://lb6pg6fy60.execute-api.eu-north-1.amazonaws.com/prod/check-version";
         string clientHash = GetExecutableHash();
         //Debug.Log(clientHash);
-        //hashtext.text = "hash: " + clientHash;
+        hashtext.text = "hash: " + clientHash;
 
         // Creamos un JSON con el hash
         string json = "{\"clientHash\":\"" + clientHash + "\"}";
