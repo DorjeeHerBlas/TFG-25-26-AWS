@@ -1,12 +1,14 @@
+using System.Collections;
 using System.IO;
 using System.Security.Cryptography;
 using System.Text;
+using TMPro;
 using UnityEngine;
 using UnityEngine.Networking;
-using System.Collections;
 
 public class CheckHash : MonoBehaviour
 {
+    public TMP_Text hashtext;
     public string GetExecutableHash()
     {
         // Obtiene la ruta del ejecutable actual
@@ -27,6 +29,7 @@ public class CheckHash : MonoBehaviour
         string url = "https://lb6pg6fy60.execute-api.eu-north-1.amazonaws.com/prod/check-version";
         string clientHash = GetExecutableHash();
         //Debug.Log(clientHash);
+        //hashtext.text = "hash: " + clientHash;
 
         // Creamos un JSON con el hash
         string json = "{\"clientHash\":\"" + clientHash + "\"}";
@@ -37,7 +40,7 @@ public class CheckHash : MonoBehaviour
         request.downloadHandler = new DownloadHandlerBuffer();
         request.SetRequestHeader("Content-Type", "application/json");
         // Usamos el token de Cognito para que solo usuarios reales puedan consultar
-        Debug.Log(PlayerPrefs.GetString("CognitoIdToken"));
+        //Debug.Log(PlayerPrefs.GetString("CognitoIdToken"));
         request.SetRequestHeader("Authorization", PlayerPrefs.GetString("CognitoIdToken"));
 
         yield return request.SendWebRequest();
