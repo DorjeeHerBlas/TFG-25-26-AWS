@@ -274,7 +274,7 @@ public class LoginController : MonoBehaviour
             LoginResponse response = JsonUtility.FromJson<LoginResponse>(request.downloadHandler.text);
             PlayerPrefs.SetString("CognitoIdToken", response.AuthenticationResult.IdToken);
             PlayerPrefs.Save();
-            Debug.Log("Token renovado con �xito.");
+            Debug.Log("Token renovado con Exito.");
         }
         else
         {
