@@ -1,171 +1,40 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="es">
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>TFG Portal - Descarga Drive</title>
-  <style>
-    body { font-family: system-ui, sans-serif; max-width: 780px; margin: 40px auto; padding: 0 16px; }
-    button { padding: 10px 14px; margin-right: 10px; margin-top: 8px; cursor: pointer; }
-    #downloadBtn { background-color: #007bff; color: white; border: none; border-radius: 4px; font-weight: bold; }
-    #downloadBtn:hover { background-color: #0056b3; }
-    pre { background: #f6f6f6; padding: 12px; overflow: auto; white-space: pre-wrap; border: 1px solid #ddd; }
-    .row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
-    .ok { color: #0a7; font-weight: 600; }
-    .bad { color: #b00; font-weight: 600; }
-  </style>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Descargar Juego Seguro</title>
+    <link rel="stylesheet" href="style.css">
+    <script src="https://rawgit.com/aws/amazon-cognito-identity-js/master/dist/amazon-cognito-identity.min.js"></script>
+    <script src="https://sdk.amazonaws.com/js/aws-sdk-2.7.16.min.js"></script>
 </head>
 <body>
-  <h1>Portal de Descarga (Cognito + Drive)</h1>
 
-  <div class="row">
-    <button id="loginBtn">Login</button>
-    <button id="logoutBtn">Logout</button>
-    <button id="downloadBtn">🚀 Descargar Juego (Drive)</button>
-    <button id="showBtn">Ver tokens (debug)</button>
-    <button id="clearBtn">Borrar tokens</button>
-    <span id="status"></span>
-  </div>
+    <div class="container">
+        <h1>🎮 Game Launcher</h1>
+        
+        <div id="login-section">
+            <h2>Acceso Restringido</h2>
+            <input type="text" id="username" placeholder="Email o Usuario">
+            <input type="password" id="password" placeholder="Contraseña">
+            <button onclick="login()">Iniciar Sesión</button>
+            <p id="error-msg" class="error"></p>
+        </div>
 
-  <h2>Consola de salida</h2>
-  <pre id="out"></pre>
+        <div id="download-section" class="hidden">
+            <h2>¡Hola, <span id="user-display">Usuario</span>!</h2>
+            <div class="status-box">
+                <p>Tu licencia es válida.</p>
+                <p id="file-info" style="color: #4cd137; font-weight: bold;"></p>
+            </div>
+            
+            <button id="btn-download" onclick="getDownloadLink()">OBTENER JUEGO (.ZIP)</button>
+            
+            <p id="status-msg"></p>
+            <button onclick="logout()" class="secondary">Cerrar Sesión</button>
+        </div>
+    </div>
 
-<script>
-/** ====== CONFIGURACIÓN ====== */
-const COGNITO_DOMAIN = "https://eu-north-1ezalt6vlv.auth.eu-north-1.amazoncognito.com";
-const CLIENT_ID = "7j1dj2a56vg9tonifmubp7lkhl";
-const REDIRECT_URI = "https://normoncorp.github.io/TFG-25-26-AWS/";
-const SCOPES = ["openid", "email", "profile"];
-
-
-// 657u1sl26h05ungaonv258qq13
-
-
-
-// !!! REEMPLAZA ESTO con la URL de tu API Gateway al terminar de configurarlo
-const API_URL = "https://1bt7rjzr45.execute-api.eu-north-1.amazonaws.com/Release";
-
-/** UI Helpers */
-const out = document.getElementById("out");
-const statusEl = document.getElementById("status");
-function log(msg) { out.textContent = msg; }
-function setStatus(ok, txt) { statusEl.className = ok ? "ok" : "bad"; statusEl.textContent = txt; }
-
-/** PKCE & Storage Helpers (Se mantienen igual) */
-function base64UrlEncode(arrayBuffer) {
-  const bytes = new Uint8Array(arrayBuffer);
-  let str = "";
-  for (const b of bytes) str += String.fromCharCode(b);
-  return btoa(str).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
-}
-function randomString(len = 64) {
-  const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~";
-  const rnd = crypto.getRandomValues(new Uint8Array(len));
-  let s = "";
-  for (let i = 0; i < len; i++) s += chars[rnd[i] % chars.length];
-  return s;
-}
-async function sha256(str) {
-  const data = new TextEncoder().encode(str);
-  return await crypto.subtle.digest("SHA-256", data);
-}
-function ssSet(k, v) { sessionStorage.setItem(k, v); }
-function ssGet(k) { return sessionStorage.getItem(k); }
-function ssDel(k) { sessionStorage.removeItem(k); }
-function tokenSet(obj) { sessionStorage.setItem("tokens", JSON.stringify(obj)); }
-function tokenGet() { const raw = sessionStorage.getItem("tokens"); return raw ? JSON.parse(raw) : null; }
-function tokenClear() { sessionStorage.removeItem("tokens"); }
-
-/** Lógica de Descarga */
-async function getDriveLink() {
-  const tokens = tokenGet();
-  if (!tokens || !tokens.id_token) {
-    setStatus(false, "Inicia sesión primero");
-    log("Error: No se encontró el ID Token. Haz login.");
-    return;
-  }
-
-  log("Solicitando enlace de descarga a la Lambda...");
-  
-  try {
-    const response = await fetch(API_URL, {
-      method: "GET",
-      headers: {
-        "Authorization": tokens.id_token // Se envía el token para que la Lambda nos valide
-      }
-    });
-
-    if (!response.ok) {
-      throw new Error(`Error API: ${response.status}`);
-    }
-
-    const data = await response.json();
-    log("Respuesta recibida:\n" + JSON.stringify(data, null, 2));
-
-    if (data.url) {
-      setStatus(true, "Enlace obtenido");
-      // Abrimos el link de Drive en una nueva pestaña
-      window.open(data.url, "_blank");
-    }
-  } catch (e) {
-    setStatus(false, "Error de descarga");
-    log("Fallo al conectar con la API: " + e.message);
-  }
-}
-
-/** OAuth Logic (Pkce flow) */
-async function buildAuthorizeUrl() {
-  const state = randomString(24);
-  const verifier = randomString(64);
-  const challenge = base64UrlEncode(await sha256(verifier));
-  ssSet("pkce_state", state);
-  ssSet("pkce_verifier", verifier);
-  const params = new URLSearchParams({
-    response_type: "code", client_id: CLIENT_ID, redirect_uri: REDIRECT_URI,
-    scope: SCOPES.join(" "), state, code_challenge: challenge, code_challenge_method: "S256",
-  });
-  return `${COGNITO_DOMAIN}/oauth2/authorize?${params.toString()}`;
-}
-
-async function exchangeCodeForTokens(code) {
-  const verifier = ssGet("pkce_verifier");
-  const body = new URLSearchParams({
-    grant_type: "authorization_code", client_id: CLIENT_ID,
-    code, redirect_uri: REDIRECT_URI, code_verifier: verifier,
-  });
-  const resp = await fetch(`${COGNITO_DOMAIN}/oauth2/token`, {
-    method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body,
-  });
-  const tokens = await resp.json();
-  tokenSet(tokens);
-  ssDel("pkce_state"); ssDel("pkce_verifier");
-}
-
-async function handleCallback() {
-  const url = new URL(window.location.href);
-  const code = url.searchParams.get("code");
-  if (!code) {
-    if (tokenGet()?.access_token) setStatus(true, "Sesión activa");
-    return;
-  }
-  try {
-    await exchangeCodeForTokens(code);
-    window.history.replaceState({}, document.title, REDIRECT_URI);
-    setStatus(true, "Login OK");
-  } catch (e) { setStatus(false, "Error en login"); }
-}
-
-/** Event Listeners */
-document.getElementById("loginBtn").onclick = async () => { window.location.href = await buildAuthorizeUrl(); };
-document.getElementById("logoutBtn").onclick = () => { 
-  tokenClear(); 
-  window.location.href = `${COGNITO_DOMAIN}/logout?client_id=${CLIENT_ID}&logout_uri=${REDIRECT_URI}`;
-};
-document.getElementById("downloadBtn").onclick = getDriveLink;
-document.getElementById("showBtn").onclick = () => { log(JSON.stringify(tokenGet(), null, 2)); };
-document.getElementById("clearBtn").onclick = () => { tokenClear(); setStatus(false, "Tokens borrados"); };
-
-handleCallback();
-</script>
+    <script src="script.js"></script>
 </body>
 </html>
