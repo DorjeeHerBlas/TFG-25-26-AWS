@@ -1,7 +1,7 @@
 // --- ⚠️ RELLENA ESTO CON TUS DATOS ---
 const poolData = {
     UserPoolId: 'eu-north-1_o4xSSQGiK',       // UserPool ID
-    ClientId: '4rka5dogcs4k6k2v1epfnkc87j'    // App Client ID
+    ClientId: '35cbbhp6mv494umuihlq2d1u1b'    // App Client ID
 };
 
 // Pega aquí la URL que obtuviste en el PASO 3.5 (Debe terminar en /prod)
@@ -48,9 +48,9 @@ function login() {
         onSuccess: function(result) {
             console.log("Login exitoso!");
             // El ID Token es el que usamos para autorizar contra API Gateway
-            var idToken = result.getIdToken().getJwtToken();
-            
-            localStorage.setItem('idToken', idToken);
+            var accessToken = result.getAccessToken().getJwtToken();
+            localStorage.setItem('idToken', accessToken);
+
             showDownloadSection(username);
         },
 
