@@ -48,8 +48,8 @@ function login() {
         onSuccess: function(result) {
             console.log("Login exitoso!");
             // El ID Token es el que usamos para autorizar contra API Gateway
-            var accessToken = result.getAccessToken().getJwtToken();
-            localStorage.setItem('idToken', accessToken);
+            var idToken = result.getIdToken().getJwtToken();
+            localStorage.setItem('idToken', idToken);
 
             showDownloadSection(username);
         },
