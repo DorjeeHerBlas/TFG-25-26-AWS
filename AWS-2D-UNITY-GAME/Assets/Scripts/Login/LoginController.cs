@@ -238,7 +238,7 @@ public class LoginController : MonoBehaviour
     }
 
     // TO DO Se tiene que llamar cuando salte el error 401 al mandar datos, ahora mismo a la hora se dejar�a de poder mandar datos
-    // CORRUTINA PARA REFRESCAR LA SESI�N
+    // CORRUTINA PARA REFRESCAR LA SESIÓN
     IEnumerator RefreshSession()
     {
         // Recuperamos los datos guardados
@@ -256,7 +256,7 @@ public class LoginController : MonoBehaviour
             SECRET_HASH = CalculateSecretHash(HASH, savedUsername, CLIENTID)
         };
 
-        // El Refresh Token se env�a fuera de AuthParameters en algunos flujos o dentro seg�n versi�n
+        // El Refresh Token se envía fuera de AuthParameters en algunos flujos o dentro según versión
         // Para USER_PASSWORD_AUTH con Refresh:
         string json = "{\"AuthFlow\":\"REFRESH_TOKEN_AUTH\",\"ClientId\":\"" + CLIENTID + "\",\"AuthParameters\":{\"REFRESH_TOKEN\":\"" + refreshToken + "\",\"SECRET_HASH\":\"" + sendData.AuthParameters.SECRET_HASH + "\"}}";
 
@@ -297,7 +297,7 @@ public class LoginController : MonoBehaviour
         }
     }
 
-    // M�todo para cerrar sesi�n manualmente
+    // Método para cerrar sesión manualmente
 public void Logout()
     {
         // 1. Limpiar tus PlayerPrefs (lo que ya tenías)

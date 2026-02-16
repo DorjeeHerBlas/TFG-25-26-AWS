@@ -507,6 +507,7 @@ GameObject:
   - component: {fileID: 697348764}
   - component: {fileID: 697348763}
   - component: {fileID: 697348765}
+  - component: {fileID: 697348766}
   m_Layer: 0
   m_Name: Controller
   m_TagString: Untagged
@@ -557,6 +558,18 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::CheckHash
   hashtext: {fileID: 76970851}
+--- !u!114 &697348766
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 697348762}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: a243763c80b43014f937c8e412c7ff08, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::DemoCheck
 --- !u!224 &732658441 stripped
 RectTransform:
   m_CorrespondingSourceObject: {fileID: 6624572974661516149, guid: fe1de83c5e45b47e182f558aef79457b, type: 3}
