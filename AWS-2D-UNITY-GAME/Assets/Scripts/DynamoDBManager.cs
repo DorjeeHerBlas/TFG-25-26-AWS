@@ -10,6 +10,8 @@ using UnityEngine.Networking;
 using System.Collections;
 using System.Security.Cryptography;
 using System.Text;
+using Unity.VectorGraphics;
+using UnityEngine.SceneManagement;
 
 public class DynamoDBManager : MonoBehaviour
 {
@@ -58,21 +60,21 @@ public class DynamoDBManager : MonoBehaviour
     }
 
     // Genera un Ticket único y lo registra en AWS
-    public void RegisterNewSession(Action onSessionRegistered)
+public void RegisterNewSession(Action onSessionRegistered)
     {
         string idToken = PlayerPrefs.GetString("CognitoIdToken");
         if (string.IsNullOrEmpty(idToken)) return;
 
-        _currentSessionToken = Guid.NewGuid().ToString(); // Ej: "123e4567-e89b-12d3-a456-426614174000"
-        Debug.Log($"🎫 Generando Ticket de Sesión: {_currentSessionToken}");
-
-        string jsonPayload = $"{{\"sessionToken\":\"{_currentSessionToken}\"}}";
+        _currentSessionToken = Guid.NewGuid().ToString(); 
+        
+        // Le decimos a AWS que venimos con intención de "registrar"
+        string jsonPayload = $"{{\"action\":\"register\", \"sessionToken\":\"{_currentSessionToken}\"}}";
         StartCoroutine(SendRegisterSession(jsonPayload, idToken, onSessionRegistered));
     }
 
     private IEnumerator SendRegisterSession(string jsonPayload, string token, Action onSuccess)
     {
-        byte[] bodyRaw = Encoding.UTF8.GetBytes(jsonPayload);
+        byte[] bodyRaw = System.Text.Encoding.UTF8.GetBytes(jsonPayload);
         UnityWebRequest request = new UnityWebRequest(RegisterSessionUrl, "POST");
         request.uploadHandler = new UploadHandlerRaw(bodyRaw);
         request.downloadHandler = new DownloadHandlerBuffer();
@@ -83,10 +85,26 @@ public class DynamoDBManager : MonoBehaviour
         
         if (request.result == UnityWebRequest.Result.Success)
         {
-            Debug.Log("✅ Sesión registrada en la nube correctamente.");
-            onSuccess?.Invoke();
+            LambdaResponse response = JsonUtility.FromJson<LambdaResponse>(request.downloadHandler.text);
+
+            if (response.code == "SESSION_IN_USE")
+            {
+               Debug.LogError("⛔❤️🎶🙈 ACCESO DENEGADO: Tu cuenta ya está jugando en otro dispositivo.");
+                
+                PlayerPrefs.DeleteKey("CognitoIdToken");
+                
+                SceneManager.LoadScene("LoginScene"); 
+                
+                // Detenemos cualquier carga adicional
+                yield break; 
+            }
+            else if (response.code == "OK")
+            {
+                Debug.Log("Tienes el control de la cuenta. Adelante.");
+                onSuccess?.Invoke();
+            }
         }
-        else Debug.LogError("Error registrando sesión: " + request.error);
+        else Debug.LogError("Error en registro de sesión: " + request.error);
     }
 
     public void SaveGameData(int score, float timePlayed)
@@ -258,6 +276,29 @@ public class DynamoDBManager : MonoBehaviour
         {
             byte[] hashBytes = hmac.ComputeHash(textBytes);
             return Convert.ToBase64String(hashBytes);
+        }
+    }
+
+    // Este método nativo de Unity se ejecuta justo antes de que la ventana del juego se cierre por completo
+    void OnApplicationQuit()
+    {
+        string idToken = PlayerPrefs.GetString("CognitoIdToken");
+        
+        if (!string.IsNullOrEmpty(idToken) && !string.IsNullOrEmpty(_currentSessionToken))
+        {
+            Debug.Log("🧹 El juego se está cerrando. Liberando la cuenta en AWS...");
+            
+            string jsonPayload = $"{{\"action\":\"unregister\"}}";
+            byte[] bodyRaw = System.Text.Encoding.UTF8.GetBytes(jsonPayload);
+            
+            UnityWebRequest request = new UnityWebRequest(RegisterSessionUrl, "POST");
+            request.uploadHandler = new UploadHandlerRaw(bodyRaw);
+            request.downloadHandler = new DownloadHandlerBuffer();
+            request.SetRequestHeader("Content-Type", "application/json");
+            request.SetRequestHeader("Authorization", idToken);
+            
+            // Lo enviamos directo sin 'yield' porque el juego se muere en este instante
+            request.SendWebRequest(); 
         }
     }
 }
