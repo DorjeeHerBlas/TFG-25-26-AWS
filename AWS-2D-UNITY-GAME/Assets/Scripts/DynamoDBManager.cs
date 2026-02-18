@@ -19,7 +19,9 @@ public class DynamoDBManager : MonoBehaviour
     private const string IdentityPoolId = "eu-north-1:026486dc-0716-49c0-99d2-ac6cb07a8c21";
     private const string UserPoolId = "eu-north-1_o4xSSQGiK"; 
     private const string TableName = "PlayerStats";
-
+    private const string RegisterSessionUrl = "https://s83rvjyf5h.execute-api.eu-north-1.amazonaws.com/prod/register-session";
+    // ticket sesión actual     
+    private string _currentSessionToken;
     private IAmazonDynamoDB _ddbClient;
     private CognitoAWSCredentials _credentials;
     private string _publicIP = "Unknown";
@@ -55,7 +57,37 @@ public class DynamoDBManager : MonoBehaviour
         if (www.result == UnityWebRequest.Result.Success) _publicIP = www.downloadHandler.text;
     }
 
-    
+    // Genera un Ticket único y lo registra en AWS
+    public void RegisterNewSession(Action onSessionRegistered)
+    {
+        string idToken = PlayerPrefs.GetString("CognitoIdToken");
+        if (string.IsNullOrEmpty(idToken)) return;
+
+        _currentSessionToken = Guid.NewGuid().ToString(); // Ej: "123e4567-e89b-12d3-a456-426614174000"
+        Debug.Log($"🎫 Generando Ticket de Sesión: {_currentSessionToken}");
+
+        string jsonPayload = $"{{\"sessionToken\":\"{_currentSessionToken}\"}}";
+        StartCoroutine(SendRegisterSession(jsonPayload, idToken, onSessionRegistered));
+    }
+
+    private IEnumerator SendRegisterSession(string jsonPayload, string token, Action onSuccess)
+    {
+        byte[] bodyRaw = Encoding.UTF8.GetBytes(jsonPayload);
+        UnityWebRequest request = new UnityWebRequest(RegisterSessionUrl, "POST");
+        request.uploadHandler = new UploadHandlerRaw(bodyRaw);
+        request.downloadHandler = new DownloadHandlerBuffer();
+        request.SetRequestHeader("Content-Type", "application/json");
+        request.SetRequestHeader("Authorization", token);
+
+        yield return request.SendWebRequest();
+        
+        if (request.result == UnityWebRequest.Result.Success)
+        {
+            Debug.Log("✅ Sesión registrada en la nube correctamente.");
+            onSuccess?.Invoke();
+        }
+        else Debug.LogError("Error registrando sesión: " + request.error);
+    }
 
     public void SaveGameData(int score, float timePlayed)
     {
@@ -148,22 +180,21 @@ public class DynamoDBManager : MonoBehaviour
     }
 
     // Anti Verdejos
-    public void VerifyDataAtStartup(string envelopeJson, Action onVerificationDone)
+   public void VerifyDataAtStartup(string envelopeJson, Action onVerificationDone)
     {
         string idToken = PlayerPrefs.GetString("CognitoIdToken");
-        
-        if (string.IsNullOrEmpty(idToken))
-        {
-            Debug.LogWarning("No hay token. Saltando verificación.");
-            onVerificationDone?.Invoke();
-            return;
-        }
+        if (string.IsNullOrEmpty(idToken)) return;
 
-        // Enviamos el archivo que hemos leído del PC directamente a AWS
-        StartCoroutine(SendVerifyRequest(envelopeJson, idToken, onVerificationDone));
+        // Abrimos el sobre que viene del PC, le metemos el Ticket de la sesión, y lo volvemos a cerrar
+        SecurePayload payload = JsonUtility.FromJson<SecurePayload>(envelopeJson);
+        payload.sessionToken = _currentSessionToken; 
+        
+        string finalPayload = JsonUtility.ToJson(payload);
+
+        StartCoroutine(SendVerifyRequest(finalPayload, idToken, onVerificationDone));
     }
 
-    private IEnumerator SendVerifyRequest(string jsonPayload, string token, Action onVerificationDone)
+   private IEnumerator SendVerifyRequest(string jsonPayload, string token, Action onVerificationDone)
     {
         byte[] bodyRaw = System.Text.Encoding.UTF8.GetBytes(jsonPayload);
         
@@ -188,7 +219,23 @@ public class DynamoDBManager : MonoBehaviour
 
             if (response != null)
             {
-                if (response.code == "BANNED") Debug.LogError("⛔ TRAMPA DETECTADA. Cuenta reseteada a 0 en la nube.");
+                if (response.code == "SESSION_EXPIRED")
+                {
+                    Debug.LogError("⛔ SESIÓN CADUCADA. Has iniciado sesión en otro dispositivo.");
+                    
+                    // 1. Borramos los tokens guardados para forzarle a loguearse de nuevo
+                    PlayerPrefs.DeleteKey("CognitoIdToken");
+                    PlayerPrefs.DeleteKey("CognitoAccessToken");
+                    PlayerPrefs.DeleteKey("CognitoRefreshToken");
+                    
+                    // 2. Le mandamos de vuelta a la escena de Login (Asegúrate de poner el nombre exacto de tu escena)
+                    UnityEngine.SceneManagement.SceneManager.LoadScene("LoginScene");
+                    
+                    // 3. DETENEMOS el código aquí para que no intente cargar la partida
+                    yield break; 
+                }
+
+                else if (response.code == "BANNED") Debug.LogError("⛔ TRAMPA DETECTADA. Cuenta reseteada a 0 en la nube.");
                 else if (response.code == "FORCE_CLOUD") Debug.Log("☁️ Archivo local desactualizado o sospechoso. Se usará la nube.");
                 else Debug.Log("✅ Datos verificados. Todo en orden.");
             }
@@ -201,6 +248,7 @@ public class DynamoDBManager : MonoBehaviour
         // Una vez que AWS responde (y castiga si hace falta), le decimos a Unity que ya puede cargar DynamoDB
         onVerificationDone?.Invoke();
     }
+    
     public string CalculateHMAC(string text)
     {
         byte[] keyBytes = Encoding.UTF8.GetBytes(SECRET_HMAC_KEY);
@@ -226,4 +274,5 @@ public class SecurePayload
 {
     public string data;      // texto íntegro de tu session_telemetry.json
     public string signature; // firma de seguridad (Hash HMAC)
+    public string sessionToken; // el Ticket de Sesión
 }

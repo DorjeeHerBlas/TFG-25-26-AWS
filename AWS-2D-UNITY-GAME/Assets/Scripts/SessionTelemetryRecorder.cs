@@ -51,46 +51,29 @@ public class SessionTelemetryRecorder : MonoBehaviour
 void Start()
     {
         startRealtime = Time.realtimeSinceStartup;
-
-        // Inicializamos datos vacíos
-        data = new SessionTelemetry
-        {
-            sessionId = Guid.NewGuid().ToString("N"),
-            startedAtUtc = DateTime.UtcNow.ToString("o"),
-            score = 0,
-            timePlayedSeconds = 0
-        };
+        data = new SessionTelemetry { sessionId = Guid.NewGuid().ToString("N"), startedAtUtc = DateTime.UtcNow.ToString("o"), score = 0, timePlayedSeconds = 0 };
 
         if (DynamoDBManager.Instance != null)
         {
-            // 1. Buscamos el último JSON guardado en el ordenador
-            string latestLocalFile = GetLatestLocalSave();
-
-            if (!string.IsNullOrEmpty(latestLocalFile))
+            // PRIMERO: Registramos el Ticket de Sesión en la base de datos
+            DynamoDBManager.Instance.RegisterNewSession(() => 
             {
-                Debug.Log("📄 Archivo local encontrado. Enviando al Juez AWS...");
-                string jsonLocal = File.ReadAllText(latestLocalFile);
-
-                // 2. Mandamos a verificar. LoadCloudData se ejecutará CUANDO AWS conteste.
-                DynamoDBManager.Instance.VerifyDataAtStartup(jsonLocal, () => 
+                // SEGUNDO: Cuando ya estamos registrados, buscamos el archivo y verificamos
+                string latestLocalFile = GetLatestLocalSave();
+                if (!string.IsNullOrEmpty(latestLocalFile))
+                {
+                    string jsonLocal = File.ReadAllText(latestLocalFile);
+                    DynamoDBManager.Instance.VerifyDataAtStartup(jsonLocal, () => LoadCloudData());
+                }
+                else
                 {
                     LoadCloudData();
-                });
-            }
-            else
-            {
-                // Jugador nuevo o sin archivos en el PC
-                Debug.Log("No hay archivo local. Cargando directamente de la nube.");
-                LoadCloudData();
-            }
+                }
+            });
         }
-
         if (playerJump != null) playerJump.OnJump += OnRealJump;
-        nextAutosaveTime = Time.realtimeSinceStartup + autosaveEverySeconds;
-        UpdateDerivedStats();
-        UpdateDebugUI();
+        UpdateDerivedStats(); UpdateDebugUI();
     }
-
     private void LoadCloudData()
     {
         DynamoDBManager.Instance.LoadData((puntosNube, tiempoNube) => 
