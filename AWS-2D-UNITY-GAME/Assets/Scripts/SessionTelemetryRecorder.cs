@@ -52,7 +52,7 @@ void Start()
     {
         startRealtime = Time.realtimeSinceStartup;
 
-        // Inicializar datos vacíos
+        // Inicializamos datos vacíos
         data = new SessionTelemetry
         {
             sessionId = Guid.NewGuid().ToString("N"),
@@ -63,28 +63,58 @@ void Start()
 
         if (DynamoDBManager.Instance != null)
         {
-            // Pedimos los datos a la nube
-            DynamoDBManager.Instance.LoadData((puntosNube, tiempoNube) => 
+            // 1. Buscamos el último JSON guardado en el ordenador
+            string latestLocalFile = GetLatestLocalSave();
+
+            if (!string.IsNullOrEmpty(latestLocalFile))
             {
-                // ESTO SE EJECUTA CUANDO AWS RESPONDE
-                // Sobrescribimos tus datos locales con los de la nube
-                data.score = puntosNube;
-                
-                // Si quieres continuar el tiempo acumulado:
-                // data.timePlayedSeconds = tiempoNube;
-                
-                // IMPORTANTE: Ajustamos el reloj interno para que no se reinicie
-                // (Si no haces esto, al sumar tiempo nuevo podrías perder el viejo)
-                // startRealtime -= tiempoNube; 
-                
-                Debug.Log("Progreso restaurado de la nube.");
-            });
+                Debug.Log("📄 Archivo local encontrado. Enviando al Juez AWS...");
+                string jsonLocal = File.ReadAllText(latestLocalFile);
+
+                // 2. Mandamos a verificar. LoadCloudData se ejecutará CUANDO AWS conteste.
+                DynamoDBManager.Instance.VerifyDataAtStartup(jsonLocal, () => 
+                {
+                    LoadCloudData();
+                });
+            }
+            else
+            {
+                // Jugador nuevo o sin archivos en el PC
+                Debug.Log("No hay archivo local. Cargando directamente de la nube.");
+                LoadCloudData();
+            }
         }
 
         if (playerJump != null) playerJump.OnJump += OnRealJump;
         nextAutosaveTime = Time.realtimeSinceStartup + autosaveEverySeconds;
         UpdateDerivedStats();
         UpdateDebugUI();
+    }
+
+    private void LoadCloudData()
+    {
+        DynamoDBManager.Instance.LoadData((puntosNube, tiempoNube) => 
+        {
+            // Sobrescribimos con lo que diga la nube.
+            // Si hubo castigo, "puntosNube" vendrá como 0.
+            data.score = puntosNube;
+            // data.timePlayedSeconds = tiempoNube; // Descomenta esto si también quieres sincronizar el tiempo
+            
+            Debug.Log($"Progreso restaurado desde DynamoDB: {puntosNube} pts.");
+        });
+    }
+
+    private string GetLatestLocalSave()
+    {
+        string dir = GetSavePath();
+        if (!Directory.Exists(dir)) return null;
+
+        string[] files = Directory.GetFiles(dir, fileNamePrefix + "*.json");
+        if (files.Length == 0) return null;
+
+        // Ordenamos alfabéticamente (por fecha) para coger el último archivo creado
+        Array.Sort(files);
+        return files[files.Length - 1];
     }
 
     void OnDestroy()
@@ -100,12 +130,12 @@ void Start()
         UpdateDebugUI();
 
         // Autosave
-        if (autosave && Time.realtimeSinceStartup >= nextAutosaveTime)
+        /*if (autosave && Time.realtimeSinceStartup >= nextAutosaveTime)
         {
             nextAutosaveTime = Time.realtimeSinceStartup + autosaveEverySeconds;
             SaveToDisk();
         }
-
+        */
          if (Keyboard.current != null &&
             Keyboard.current.spaceKey.wasPressedThisFrame)
         {
@@ -115,6 +145,7 @@ void Start()
 
     private void OnApplicationQuit()
     {
+        dbManager.SaveGameData(data.score, data.timePlayedSeconds);
         SaveToDisk();
     }
 
@@ -184,44 +215,39 @@ public void SaveToDisk()
 
     string timestamp = DateTime.Now.ToString("yyyy-MM-dd_HH-mm-ss");
     string shortSession = data.sessionId.Substring(0, 6);
+    string fileName = $"{fileNamePrefix}{timestamp}_{shortSession}.json";
+    string path = Path.Combine(GetSavePath(), fileName);
 
-    string fileName =
-        $"{fileNamePrefix}{timestamp}_{shortSession}.json";
+    // 1. Convertimos los datos del juego a texto (SIN FIRMAR AÚN)
+    string rawDataJson = JsonUtility.ToJson(data, prettyPrint: true);
 
-    // Raíz del proyecto (Assets/..)
-    string projectRoot = Path.GetFullPath(
-        Path.Combine(Application.dataPath, "..")
-    );
-
-    string path = Path.Combine(projectRoot, fileName);
-
-    string json = JsonUtility.ToJson(data, prettyPrint: true);
-    File.WriteAllText(path, json);
-
-    Debug.Log($"Telemetry saved at:\n{path}");
-#else
-    Debug.LogWarning("SaveToDisk skipped: writing to project root is editor-only.");
-#endif
+    // 2. LA SEGURIDAD: Firmamos los datos en este momento exacto
+    string signature = "";
     if (DynamoDBManager.Instance != null)
-        {
-            int finalScore = data.score;
-            float finalTime = data.timePlayedSeconds;
+    {
+        signature = DynamoDBManager.Instance.CalculateHMAC(rawDataJson);
+    }
 
-            // Si tenemos el manager conectado, usamos los DATOS TOTALES REALES
-            if (statsManager != null)
-            {
-                finalScore = statsManager.score;
-                finalTime = statsManager.totalTimeAccumulated;
-            }
+    // 3. Metemos los datos y la firma dentro del sobre
+    SecurePayload envelope = new SecurePayload 
+    { 
+        data = rawDataJson, 
+        signature = signature 
+    };
 
-            DynamoDBManager.Instance.SaveGameData(finalScore, finalTime);
-        }
-        else
-        {
-            Debug.LogWarning("DynamoDBManager no encontrado.");
-        }
+    // 4. Guardamos el SOBRE en el ordenador del jugador
+    string finalJsonToSave = JsonUtility.ToJson(envelope, prettyPrint: true);
+    File.WriteAllText(path, finalJsonToSave);
+
+    Debug.Log($"📄 Telemetría segura guardada en:\n{path}");
+#endif
+
+    // Guardado normal en la nube (esto se queda igual)
+    if (DynamoDBManager.Instance != null && statsManager != null)
+    {
+        DynamoDBManager.Instance.SaveGameData(statsManager.score, statsManager.totalTimeAccumulated);
+    }
 }
-
 public string GetSavePath()
 {
 #if UNITY_EDITOR

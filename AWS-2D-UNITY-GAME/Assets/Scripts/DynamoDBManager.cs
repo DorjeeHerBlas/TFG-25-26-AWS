@@ -4,10 +4,12 @@ using Amazon.CognitoIdentity;
 using Amazon.DynamoDBv2;
 using Amazon.DynamoDBv2.Model;
 using Amazon.Runtime;
+using System;
 using System.Collections.Generic;
 using UnityEngine.Networking;
 using System.Collections;
-using System;
+using System.Security.Cryptography;
+using System.Text;
 
 public class DynamoDBManager : MonoBehaviour
 {
@@ -21,7 +23,9 @@ public class DynamoDBManager : MonoBehaviour
     private IAmazonDynamoDB _ddbClient;
     private CognitoAWSCredentials _credentials;
     private string _publicIP = "Unknown";
-
+    // URL del Juez Anti-Trampas
+    private const string VerifyApiUrl = "https://s83rvjyf5h.execute-api.eu-north-1.amazonaws.com/prod/verify-stats";
+    public const string SECRET_HMAC_KEY = "MiClaveSecretaAntiCheatTFG";
     void Awake()
     {
         UnityInitializer.AttachToGameObject(this.gameObject);
@@ -142,4 +146,84 @@ public class DynamoDBManager : MonoBehaviour
         _credentials.AddLogin("cognito-idp.eu-north-1.amazonaws.com/" + UserPoolId, idToken);
         _ddbClient = new AmazonDynamoDBClient(_credentials, _Region);
     }
+
+    // Anti Verdejos
+    public void VerifyDataAtStartup(string envelopeJson, Action onVerificationDone)
+    {
+        string idToken = PlayerPrefs.GetString("CognitoIdToken");
+        
+        if (string.IsNullOrEmpty(idToken))
+        {
+            Debug.LogWarning("No hay token. Saltando verificación.");
+            onVerificationDone?.Invoke();
+            return;
+        }
+
+        // Enviamos el archivo que hemos leído del PC directamente a AWS
+        StartCoroutine(SendVerifyRequest(envelopeJson, idToken, onVerificationDone));
+    }
+
+    private IEnumerator SendVerifyRequest(string jsonPayload, string token, Action onVerificationDone)
+    {
+        byte[] bodyRaw = System.Text.Encoding.UTF8.GetBytes(jsonPayload);
+        
+        UnityWebRequest request = new UnityWebRequest(VerifyApiUrl, "POST");
+        request.uploadHandler = new UploadHandlerRaw(bodyRaw);
+        request.downloadHandler = new DownloadHandlerBuffer();
+        
+        request.SetRequestHeader("Content-Type", "application/json");
+        request.SetRequestHeader("Authorization", token); // El Token de Cognito es tu pase de seguridad
+
+        Debug.Log("🕵️ Enviando JSON local a AWS para verificación...");
+        
+        yield return request.SendWebRequest();
+
+        if (request.result == UnityWebRequest.Result.Success)
+        {
+            string responseJson = request.downloadHandler.text;
+            Debug.Log("Veredicto de AWS: " + responseJson);
+
+            // Leemos qué ha decidido la Lambda
+            LambdaResponse response = JsonUtility.FromJson<LambdaResponse>(responseJson);
+
+            if (response != null)
+            {
+                if (response.code == "BANNED") Debug.LogError("⛔ TRAMPA DETECTADA. Cuenta reseteada a 0 en la nube.");
+                else if (response.code == "FORCE_CLOUD") Debug.Log("☁️ Archivo local desactualizado o sospechoso. Se usará la nube.");
+                else Debug.Log("✅ Datos verificados. Todo en orden.");
+            }
+        }
+        else
+        {
+            Debug.LogError("Error conectando con el Juez: " + request.error);
+        }
+
+        // Una vez que AWS responde (y castiga si hace falta), le decimos a Unity que ya puede cargar DynamoDB
+        onVerificationDone?.Invoke();
+    }
+    public string CalculateHMAC(string text)
+    {
+        byte[] keyBytes = Encoding.UTF8.GetBytes(SECRET_HMAC_KEY);
+        byte[] textBytes = Encoding.UTF8.GetBytes(text);
+        
+        using (HMACSHA256 hmac = new HMACSHA256(keyBytes))
+        {
+            byte[] hashBytes = hmac.ComputeHash(textBytes);
+            return Convert.ToBase64String(hashBytes);
+        }
+    }
+}
+
+[Serializable]
+public class LambdaResponse
+{
+    public string code;
+    public string message;
+}
+
+[Serializable]
+public class SecurePayload
+{
+    public string data;      // texto íntegro de tu session_telemetry.json
+    public string signature; // firma de seguridad (Hash HMAC)
 }
