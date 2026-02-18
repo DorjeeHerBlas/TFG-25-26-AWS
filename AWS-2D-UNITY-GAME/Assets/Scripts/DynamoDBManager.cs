@@ -12,6 +12,7 @@ using System.Security.Cryptography;
 using System.Text;
 using Unity.VectorGraphics;
 using UnityEngine.SceneManagement;
+using System.Globalization;
 
 public class DynamoDBManager : MonoBehaviour
 {
@@ -107,14 +108,16 @@ public void RegisterNewSession(Action onSessionRegistered)
         else Debug.LogError("Error en registro de sesión: " + request.error);
     }
 
-    public void SaveGameData(int score, float timePlayed)
+public void SaveGameData(int score, float timePlayed)
     {
         string idToken = PlayerPrefs.GetString("CognitoIdToken");
         string username = PlayerPrefs.GetString("CognitoUsername", "UnknownUser");
 
         if (string.IsNullOrEmpty(idToken)) return;
-
-        if (_ddbClient == null) InitClient(idToken); // Inicializar si hace falta
+        if (_ddbClient == null) InitClient(idToken);
+        
+        // Si no tenemos Ticket de sesión, abortamos para no corromper datos
+        if (string.IsNullOrEmpty(_currentSessionToken)) return;
 
         var request = new PutItemRequest
         {
@@ -122,17 +125,39 @@ public void RegisterNewSession(Action onSessionRegistered)
             Item = new Dictionary<string, AttributeValue>
             {
                 { "UserId", new AttributeValue { S = username } },
-                { "Score", new AttributeValue { N = score.ToString() } },
-                { "TimePlayed", new AttributeValue { N = timePlayed.ToString("F2") } },
+                { "Score", new AttributeValue { N = score.ToString(CultureInfo.InvariantCulture) } },
+                { "TimePlayed", new AttributeValue { N = timePlayed.ToString("F2", CultureInfo.InvariantCulture) } },
                 { "IPAddress", new AttributeValue { S = _publicIP } },
-                { "LastUpdated", new AttributeValue { S = DateTime.UtcNow.ToString("o") } }
+                { "LastUpdated", new AttributeValue { S = DateTime.UtcNow.ToString("o") } },             
+                { "ActiveSessionToken", new AttributeValue { S = _currentSessionToken } }
+            },
+            
+            ConditionExpression = "attribute_not_exists(ActiveSessionToken) OR ActiveSessionToken = :myToken",
+            ExpressionAttributeValues = new Dictionary<string, AttributeValue>
+            {
+                { ":myToken", new AttributeValue { S = _currentSessionToken } }
             }
         };
 
         _ddbClient.PutItemAsync(request, (result) =>
         {
-            if (result.Exception != null) Debug.LogError("Error guardando: " + result.Exception.Message);
-            else Debug.Log("✅ Guardado en la nube.");
+            if (result.Exception != null)
+            {
+                if (result.Exception.Message.Contains("ConditionalCheckFailed") || result.Exception is ConditionalCheckFailedException)
+                {
+                    Debug.LogError("SESIÓN CADUCADA DURANTE EL GUARDADO. Alguien ha entrado a tu cuenta.");
+                    PlayerPrefs.DeleteKey("CognitoIdToken");
+                    UnityEngine.SceneManagement.SceneManager.LoadScene("LoginScene"); 
+                }
+                else
+                {
+                    Debug.LogError("Error guardando: " + result.Exception.Message);
+                }
+            }
+            else 
+            {
+                Debug.Log("✅ Guardado en la nube validado. Eres el jugador activo.");
+            }
         });
     }
 
@@ -190,9 +215,11 @@ public void RegisterNewSession(Action onSessionRegistered)
         Debug.Log("🔒 AWS Credentials limpiadas correctamente.");
     }
 
-    private void InitClient(string idToken)
+private void InitClient(string idToken)
     {
         _credentials = new CognitoAWSCredentials(IdentityPoolId, _Region);
+        _credentials.Clear(); 
+        
         _credentials.AddLogin("cognito-idp.eu-north-1.amazonaws.com/" + UserPoolId, idToken);
         _ddbClient = new AmazonDynamoDBClient(_credentials, _Region);
     }
