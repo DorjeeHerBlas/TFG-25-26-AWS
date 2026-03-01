@@ -1,11 +1,12 @@
-using UnityEngine;
-using UnityEngine.Networking;
 using System;
 using System.Collections;
 using System.IO;
 using System.Security.Cryptography;
 using System.Text;
 using TMPro;
+using UnityEngine;
+using UnityEngine.Networking;
+using UnityEngine.SceneManagement;
 
 public class DemoCheck : MonoBehaviour
 {
@@ -24,7 +25,7 @@ public class DemoCheck : MonoBehaviour
         if (request.responseCode != 200)
         {
             Debug.Log("Acceso denegado: " + request.downloadHandler.text);
-            Application.Quit();
+            //SceneManager.LoadScene("LoginScene");
             yield break;
         }
 
@@ -32,7 +33,7 @@ public class DemoCheck : MonoBehaviour
         if (request.result != UnityWebRequest.Result.Success)
         {
             Debug.Log("Error conexión: " + request.error);
-            Application.Quit();
+            //SceneManager.LoadScene("LoginScene"); ;
             yield break;
         }
 

@@ -6,6 +6,7 @@ using System.Text;
 using TMPro;
 using UnityEngine;
 using UnityEngine.Networking;
+using UnityEngine.SceneManagement;
 
 public class CheckHash : MonoBehaviour
 {
@@ -78,7 +79,7 @@ public class CheckHash : MonoBehaviour
             Debug.LogError("CÓDIGO: " + request.responseCode);
             Debug.LogError("RESPUESTA DE AWS: " + request.downloadHandler.text);
             Debug.LogError("ERROR DE SISTEMA: " + request.error);
-            Application.Quit();
+            //SceneManager.LoadScene("LoginScene");
         }
     }
 
