@@ -1,66 +1,14 @@
-# TFG-25-26-AWS  
-## Player Protection: The Black Box of Game Logic
+# Technical Framework: Player Protection - The Black Box of Logic
 
-https://normoncorp.github.io/Presigned-URL-AWS-UNITYGAME/
+The framework titled **"Player Protection: The Black Box of Logic"** establishes a secure-by-design architecture that shifts the authority of game logic and data validation from the player's client device to a controlled serverless environment. Historically, the video game industry—particularly in independent and academic sectors—has relied on client-side validation, which creates structural vulnerabilities such as score manipulation, account theft, and the distribution of unauthorized versions. This project addresses these gaps by applying **distributed computing principles** and a **Zero Trust paradigm**, ensuring that every request is authenticated, authorized, and verified regardless of its origin.
 
-![AWS](https://img.shields.io/badge/AWS-Serverless-orange)
-![Security](https://img.shields.io/badge/Security-Zero%20Trust-critical)
-![Backend](https://img.shields.io/badge/Architecture-Backend-blue)
-![Unity](https://img.shields.io/badge/Client-Unity-black)
-![Academic](https://img.shields.io/badge/Project-Final%20Degree%20Project-success)
+### Technological Implementation and Usage
+The system is constructed using an **Amazon Web Services (AWS)** serverless stack, which reduces the attack surface by eliminating permanently exposed server infrastructure. The operational flow is managed through several key layers:
 
-Secure serverless backend architecture for video games using AWS.
+*   **Identity and Perimeter Security:** **Amazon Cognito** manages player identities and issues digitally signed **JSON Web Tokens (JWT)**. **Amazon API Gateway** acts as the secure entry point, performing initial token validation and enforcing rate limiting (throttling) to prevent brute-force attacks and resource abuse.
+*   **Business Logic and Validation:** **AWS Lambda** functions execute the core game logic on demand. For instance, the `VerifyPlayerStats` flow ensures data integrity by recalculating **HMAC-SHA256 signatures** on the server side to detect if the client has tampered with game metrics. Similarly, the `VerifyGameHash` function checks the integrity of the game's executable against a table of authorized versions in **Amazon DynamoDB**.
+*   **Data Consistency and Distribution:** **Amazon DynamoDB** provides high-performance, NoSQL storage for player profiles and session states, utilizing **TTL (Time To Live)** attributes to automatically purge expired tokens and temporary data. For the secure distribution of assets, the system uses **Amazon S3** with **presigned URLs**, granting players temporary, five-minute access to specific files without exposing the storage bucket publicly.
+*   **Observability:** **Amazon CloudWatch** centralizes logging and monitoring, enabling the detection of anomalous patterns, such as repeated failed login attempts or unusual traffic, which can trigger automated defensive responses like account suspension or IP blocking.
 
----
-
-## Overview
-
-This project proposes a **secure-by-design backend for video games**, built on **AWS serverless services** and **distributed systems principles**.
-
-The core idea is to **move game authority from the client to the server**, preventing common issues such as score manipulation, insecure validation, and lack of traceability.
-
-Developed as a **Final Degree Project (TFG)** at Universidad Complutense de Madrid, the architecture is designed to be **replicable and practical** beyond academia.
-
----
-
-## Key Principles
-
-- Never trust the client (Zero Trust)
-- Server-side authority
-- Security by design
-- Event-driven & serverless
-- Full observability and auditability
-
----
-
-## Tech Stack
-
-- AWS Lambda  
-- Amazon API Gateway  
-- Amazon DynamoDB  
-- Amazon S3  
-- Amazon Cognito  
-- Amazon CloudWatch  
-- Unity (C#)
-
----
-
-## What It Solves
-
-- Secure score and progression validation  
-- Centralized authentication and identity  
-- License issuing and verification  
-- Telemetry and anomaly detection  
-
----
-
-## Academic Context
-
-Final Degree Project – Universidad Complutense de Madrid  
-Authors: Alberto Peñalba Martos · Dorjee Khampa Herrezuelo Blasco  
-
----
-
-## License
-
-Academic and research use. Attribution required.
+### Authorship and Direction
+This Final Degree Project (TFG) was developed at the **Universidad Complutense de Madrid** by authors **Alberto Peñalba Martos** and **Dorje Khampa Herrezuelo Blasco**, under the direction of **José Luis Vázquez Poletti** and **David Pacios Izquierdo**.
