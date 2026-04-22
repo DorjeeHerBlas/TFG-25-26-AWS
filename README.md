@@ -31,9 +31,9 @@ This Final Degree Project (TFG) was developed at the **Universidad Complutense d
 - [ ] Revisar el documento completo en busca de cualquier otra nota interna o comentario de edición que haya quedado
 
 ### Política bilingüe
-- [ ] Decidir si el documento es en español o bilingüe
-- [ ] Si bilingüe: completar las partes en inglés que están vacías o sin simetría con el español
-- [ ] Si solo español: retirar las secciones en inglés incompletas
+- [X] Decidir si el documento es en español o bilingüe
+- [X] Si bilingüe: completar las partes en inglés que están vacías o sin simetría con el español
+- [X] Si solo español: retirar las secciones en inglés incompletas
 
 ### Clave secreta embebida en el cliente Unity (pág. 35)
 - [ ] Replantear el mecanismo de la clave secreta embebida mediante ofuscación — contradice el principio de trasladar la autoridad al servidor
