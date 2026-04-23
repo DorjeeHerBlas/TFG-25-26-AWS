@@ -8,10 +8,10 @@ using UnityEngine.InputSystem;
 public class SessionTelemetryRecorder : MonoBehaviour
 {
     [Header("Refs")]
-    public JumpComponent playerJump;     // para contar SOLO saltos reales
-    public TMP_Text debugText;           // opcional: mostrar métricas en UI
+    public JumpComponent playerJump;
+    public TMP_Text debugText;
     public ScoreComponent statsManager;
-    public DynamoDBManager dbManager;   // referencia al manager para guardar en la nube
+    public DynamoDBManager dbManager;
 
     [Header("Save")]
     public bool autosave = true;
@@ -21,7 +21,6 @@ public class SessionTelemetryRecorder : MonoBehaviour
     private SessionTelemetry data;
     private float nextAutosaveTime;
 
-    // Ventanas deslizantes de eventos (saltos reales)
     private readonly Queue<float> last10s = new Queue<float>();
     private readonly Queue<float> last60s = new Queue<float>();
 
@@ -34,8 +33,8 @@ public class SessionTelemetryRecorder : MonoBehaviour
 
         public float timePlayedSeconds;
 
-        public int score;         // aquí score = saltos reales
-        public int validKeyCount; // “teclas válidas” (saltos reales)
+        public int score;
+        public int validKeyCount;
 
         public float keysPerSecondAvg;
         public float keysPerMinuteAvg;
@@ -43,27 +42,39 @@ public class SessionTelemetryRecorder : MonoBehaviour
         public float keysPerSecondLast10;
         public int keysPerMinuteLast60;
 
-        public string notes; // por si quieres añadir info extra
+        public string notes;
     }
 
     private float startRealtime;
 
-void Start()
+    void Start()
     {
         startRealtime = Time.realtimeSinceStartup;
-        data = new SessionTelemetry { sessionId = Guid.NewGuid().ToString("N"), startedAtUtc = DateTime.UtcNow.ToString("o"), score = 0, timePlayedSeconds = 0 };
+        data = new SessionTelemetry
+        {
+            sessionId      = Guid.NewGuid().ToString("N"),
+            startedAtUtc   = DateTime.UtcNow.ToString("o"),
+            score          = 0,
+            timePlayedSeconds = 0
+        };
 
         if (DynamoDBManager.Instance != null)
         {
-            // PRIMERO: Registramos el Ticket de Sesión en la base de datos
-            DynamoDBManager.Instance.RegisterNewSession(() => 
+            DynamoDBManager.Instance.RegisterNewSession(() =>
             {
-                // SEGUNDO: Cuando ya estamos registrados, buscamos el archivo y verificamos
                 string latestLocalFile = GetLatestLocalSave();
                 if (!string.IsNullOrEmpty(latestLocalFile))
                 {
-                    string jsonLocal = File.ReadAllText(latestLocalFile);
-                    DynamoDBManager.Instance.VerifyDataAtStartup(jsonLocal, () => LoadCloudData());
+                    // Leemos el sobre del disco y extraemos solo el JSON de telemetría.
+                    // El servidor ya no necesita la firma: el nonce actúa como prueba
+                    // de que este envío es legítimo y reciente.
+                    string envelopeJson = File.ReadAllText(latestLocalFile);
+                    LocalEnvelope envelope = JsonUtility.FromJson<LocalEnvelope>(envelopeJson);
+                    string rawTelemetry = (envelope != null && !string.IsNullOrEmpty(envelope.data))
+                        ? envelope.data
+                        : envelopeJson; // fallback: el archivo ya era solo telemetría plana
+
+                    DynamoDBManager.Instance.VerifyDataAtStartup(rawTelemetry, () => LoadCloudData());
                 }
                 else
                 {
@@ -71,18 +82,17 @@ void Start()
                 }
             });
         }
+
         if (playerJump != null) playerJump.OnJump += OnRealJump;
-        UpdateDerivedStats(); UpdateDebugUI();
+        UpdateDerivedStats();
+        UpdateDebugUI();
     }
+
     private void LoadCloudData()
     {
-        DynamoDBManager.Instance.LoadData((puntosNube, tiempoNube) => 
+        DynamoDBManager.Instance.LoadData((puntosNube, tiempoNube) =>
         {
-            // Sobrescribimos con lo que diga la nube.
-            // Si hubo castigo, "puntosNube" vendrá como 0.
             data.score = puntosNube;
-            // data.timePlayedSeconds = tiempoNube; // Descomenta esto si también quieres sincronizar el tiempo
-            
             Debug.Log($"Progreso restaurado desde DynamoDB: {puntosNube} pts.");
         });
     }
@@ -95,7 +105,6 @@ void Start()
         string[] files = Directory.GetFiles(dir, fileNamePrefix + "*.json");
         if (files.Length == 0) return null;
 
-        // Ordenamos alfabéticamente (por fecha) para coger el último archivo creado
         Array.Sort(files);
         return files[files.Length - 1];
     }
@@ -108,19 +117,10 @@ void Start()
 
     void Update()
     {
-        // Actualiza tiempo jugado y métricas derivadas
         UpdateDerivedStats();
         UpdateDebugUI();
 
-        // Autosave
-        /*if (autosave && Time.realtimeSinceStartup >= nextAutosaveTime)
-        {
-            nextAutosaveTime = Time.realtimeSinceStartup + autosaveEverySeconds;
-            SaveToDisk();
-        }
-        */
-         if (Keyboard.current != null &&
-            Keyboard.current.spaceKey.wasPressedThisFrame)
+        if (Keyboard.current != null && Keyboard.current.spaceKey.wasPressedThisFrame)
         {
             dbManager.SaveGameData(data.score, data.timePlayedSeconds);
         }
@@ -134,7 +134,6 @@ void Start()
 
     private void OnRealJump()
     {
-        // salto real => incrementa score y conteo de “teclas válidas”
         data.score++;
         data.validKeyCount++;
 
@@ -155,11 +154,10 @@ void Start()
 
     private void UpdateDerivedStats()
     {
-        float now = Time.realtimeSinceStartup;
+        float now    = Time.realtimeSinceStartup;
         float played = now - startRealtime;
 
         data.timePlayedSeconds = Mathf.Max(0f, played);
-
         PruneQueues(now);
 
         if (data.timePlayedSeconds > 0.0001f)
@@ -174,7 +172,7 @@ void Start()
         }
 
         data.keysPerSecondLast10 = last10s.Count / 10f;
-        data.keysPerMinuteLast60 = last60s.Count; // ya es ventana 60s => “por minuto”
+        data.keysPerMinuteLast60 = last60s.Count;
     }
 
     private void UpdateDebugUI()
@@ -191,64 +189,53 @@ void Start()
             $"KPM last60: {data.keysPerMinuteLast60}";
     }
 
-public void SaveToDisk()
-{
-#if UNITY_EDITOR
-    data.lastSavedAtUtc = DateTime.UtcNow.ToString("o");
-
-    string timestamp = DateTime.Now.ToString("yyyy-MM-dd_HH-mm-ss");
-    string shortSession = data.sessionId.Substring(0, 6);
-    string fileName = $"{fileNamePrefix}{timestamp}_{shortSession}.json";
-    string path = Path.Combine(GetSavePath(), fileName);
-
-    // 1. Convertimos los datos del juego a texto (SIN FIRMAR AÚN)
-    string rawDataJson = JsonUtility.ToJson(data, prettyPrint: true);
-
-    // 2. LA SEGURIDAD: Firmamos los datos en este momento exacto
-    string signature = "";
-    if (DynamoDBManager.Instance != null)
+    public void SaveToDisk()
     {
-        signature = DynamoDBManager.Instance.CalculateHMAC(rawDataJson);
-    }
+#if UNITY_EDITOR
+        data.lastSavedAtUtc = DateTime.UtcNow.ToString("o");
 
-    // 3. Metemos los datos y la firma dentro del sobre
-    SecurePayload envelope = new SecurePayload 
-    { 
-        data = rawDataJson, 
-        signature = signature 
-    };
+        string timestamp    = DateTime.Now.ToString("yyyy-MM-dd_HH-mm-ss");
+        string shortSession = data.sessionId.Substring(0, 6);
+        string fileName     = $"{fileNamePrefix}{timestamp}_{shortSession}.json";
+        string path         = Path.Combine(GetSavePath(), fileName);
 
-    // 4. Guardamos el SOBRE en el ordenador del jugador
-    string finalJsonToSave = JsonUtility.ToJson(envelope, prettyPrint: true);
-    File.WriteAllText(path, finalJsonToSave);
+        // Serializamos la telemetría plana — sin firma, sin secreto.
+        // La autenticidad del envío la garantiza el nonce que el servidor
+        // emitirá en el momento de la verificación, no algo calculado aquí.
+        string rawDataJson = JsonUtility.ToJson(data, prettyPrint: true);
 
-    Debug.Log($"📄 Telemetría segura guardada en:\n{path}");
+        // Guardamos un sobre mínimo: solo data. Mantenemos la estructura de
+        // objeto por si se añaden metadatos en el futuro (versión, plataforma…).
+        LocalEnvelope envelope = new LocalEnvelope { data = rawDataJson };
+        File.WriteAllText(path, JsonUtility.ToJson(envelope, prettyPrint: true));
+
+        Debug.Log($"Telemetría guardada en:\n{path}");
 #endif
 
-    // Guardado normal en la nube (esto se queda igual)
-    if (DynamoDBManager.Instance != null && statsManager != null)
-    {
-        DynamoDBManager.Instance.SaveGameData(statsManager.score, statsManager.totalTimeAccumulated);
+        if (DynamoDBManager.Instance != null && statsManager != null)
+        {
+            DynamoDBManager.Instance.SaveGameData(statsManager.score, statsManager.totalTimeAccumulated);
+        }
     }
-}
-public string GetSavePath()
-{
+
+    public string GetSavePath()
+    {
 #if UNITY_EDITOR
-    string projectRoot = Path.GetFullPath(
-        Path.Combine(Application.dataPath, "..")
-    );
-    return projectRoot;
+        return Path.GetFullPath(Path.Combine(Application.dataPath, ".."));
 #else
-    return Application.persistentDataPath;
+        return Application.persistentDataPath;
 #endif
+    }
+
+    public SessionTelemetry GetCurrentSnapshot() => data;
 }
 
-
-
-    public SessionTelemetry GetCurrentSnapshot()
-    {
-        // Devuelve una copia “lógica” (referencia) del estado actual.
-        // Si quieres copia profunda, lo hago, pero para prototipo va perfecto.
-        return data;
-    }
+/// <summary>
+/// Formato del archivo local de telemetría.
+/// Solo contiene el JSON de datos — sin firma ni secreto.
+/// </summary>
+[Serializable]
+public class LocalEnvelope
+{
+    public string data;
 }

@@ -8,9 +8,6 @@ using System;
 using System.Collections.Generic;
 using UnityEngine.Networking;
 using System.Collections;
-using System.Security.Cryptography;
-using System.Text;
-using Unity.VectorGraphics;
 using UnityEngine.SceneManagement;
 using System.Globalization;
 
@@ -20,23 +17,24 @@ public class DynamoDBManager : MonoBehaviour
 
     private RegionEndpoint _Region = RegionEndpoint.EUNorth1;
     private const string IdentityPoolId = "eu-north-1:026486dc-0716-49c0-99d2-ac6cb07a8c21";
-    private const string UserPoolId = "eu-north-1_o4xSSQGiK"; 
+    private const string UserPoolId = "eu-north-1_o4xSSQGiK";
     private const string TableName = "PlayerStats";
     private const string RegisterSessionUrl = "https://s83rvjyf5h.execute-api.eu-north-1.amazonaws.com/prod/register-session";
-    // ticket sesión actual     
+    private const string VerifyApiUrl = "https://s83rvjyf5h.execute-api.eu-north-1.amazonaws.com/prod/verify-stats";
+
+    // URL del nuevo endpoint que emite nonces efímeros
+    private const string NonceUrl = "https://s83rvjyf5h.execute-api.eu-north-1.amazonaws.com/prod/request-nonce";
+
     private string _currentSessionToken;
     private IAmazonDynamoDB _ddbClient;
     private CognitoAWSCredentials _credentials;
     private string _publicIP = "Unknown";
-    // URL del Juez Anti-Trampas
-    private const string VerifyApiUrl = "https://s83rvjyf5h.execute-api.eu-north-1.amazonaws.com/prod/verify-stats";
-    public const string SECRET_HMAC_KEY = "MiClaveSecretaAntiCheatTFG";
+
     void Awake()
     {
         UnityInitializer.AttachToGameObject(this.gameObject);
         AWSConfigs.HttpClient = AWSConfigs.HttpClientOption.UnityWebRequest;
 
-        // Singleton
         if (Instance == null)
         {
             Instance = this;
@@ -60,15 +58,15 @@ public class DynamoDBManager : MonoBehaviour
         if (www.result == UnityWebRequest.Result.Success) _publicIP = www.downloadHandler.text;
     }
 
-    // Genera un Ticket único y lo registra en AWS
-public void RegisterNewSession(Action onSessionRegistered)
+    // ─── Registro de sesión (sin cambios de lógica) ───────────────────────────
+
+    public void RegisterNewSession(Action onSessionRegistered)
     {
         string idToken = PlayerPrefs.GetString("CognitoIdToken");
         if (string.IsNullOrEmpty(idToken)) return;
 
-        _currentSessionToken = Guid.NewGuid().ToString(); 
-        
-        // Le decimos a AWS que venimos con intención de "registrar"
+        _currentSessionToken = Guid.NewGuid().ToString();
+
         string jsonPayload = $"{{\"action\":\"register\", \"sessionToken\":\"{_currentSessionToken}\"}}";
         StartCoroutine(SendRegisterSession(jsonPayload, idToken, onSessionRegistered));
     }
@@ -83,40 +81,163 @@ public void RegisterNewSession(Action onSessionRegistered)
         request.SetRequestHeader("Authorization", token);
 
         yield return request.SendWebRequest();
-        
+
         if (request.result == UnityWebRequest.Result.Success)
         {
             LambdaResponse response = JsonUtility.FromJson<LambdaResponse>(request.downloadHandler.text);
 
             if (response.code == "SESSION_IN_USE")
             {
-               Debug.LogError("⛔❤️🎶🙈 ACCESO DENEGADO: Tu cuenta ya está jugando en otro dispositivo.");
-                
+                Debug.LogError("⛔ ACCESO DENEGADO: Tu cuenta ya está jugando en otro dispositivo.");
                 PlayerPrefs.DeleteKey("CognitoIdToken");
-                
-                SceneManager.LoadScene("LoginScene"); 
-                
-                // Detenemos cualquier carga adicional
-                yield break; 
+                SceneManager.LoadScene("LoginScene");
+                yield break;
             }
             else if (response.code == "OK")
             {
-                Debug.Log("Tienes el control de la cuenta. Adelante.");
+                Debug.Log("Sesión registrada. Adelante.");
                 onSuccess?.Invoke();
             }
         }
         else Debug.LogError("Error en registro de sesión: " + request.error);
     }
 
-public void SaveGameData(int score, float timePlayed)
+    // ─── Nonce efímero ────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Solicita al servidor un nonce de un solo uso con TTL corto.
+    /// El servidor lo genera, lo almacena en DynamoDB y lo devuelve al cliente.
+    /// El cliente nunca posee ningún secreto: el nonce es solo un ticket de un viaje.
+    /// </summary>
+    public void RequestNonce(Action<string> onNonceReceived)
+    {
+        string idToken = PlayerPrefs.GetString("CognitoIdToken");
+        if (string.IsNullOrEmpty(idToken))
+        {
+            Debug.LogError("RequestNonce: no hay sesión Cognito activa.");
+            return;
+        }
+        StartCoroutine(FetchNonce(idToken, onNonceReceived));
+    }
+
+    private IEnumerator FetchNonce(string token, Action<string> onNonceReceived)
+    {
+        // Payload mínimo: el servidor sabe quién eres por el token Cognito del header
+        byte[] bodyRaw = System.Text.Encoding.UTF8.GetBytes("{}");
+        UnityWebRequest request = new UnityWebRequest(NonceUrl, "POST");
+        request.uploadHandler = new UploadHandlerRaw(bodyRaw);
+        request.downloadHandler = new DownloadHandlerBuffer();
+        request.SetRequestHeader("Content-Type", "application/json");
+        request.SetRequestHeader("Authorization", token);
+
+        yield return request.SendWebRequest();
+
+        if (request.result == UnityWebRequest.Result.Success)
+        {
+            NonceResponse response = JsonUtility.FromJson<NonceResponse>(request.downloadHandler.text);
+            if (response != null && !string.IsNullOrEmpty(response.nonce))
+            {
+                Debug.Log("Nonce recibido del servidor.");
+                onNonceReceived?.Invoke(response.nonce);
+            }
+            else
+            {
+                Debug.LogError("RequestNonce: respuesta vacía o malformada.");
+            }
+        }
+        else
+        {
+            Debug.LogError("RequestNonce: error de red — " + request.error);
+        }
+    }
+
+    // ─── Verificación de telemetría local (usa nonce, sin HMAC) ──────────────
+
+    /// <summary>
+    /// Solicita primero un nonce al servidor y luego envía el JSON de telemetría
+    /// local adjuntando ese nonce. La Lambda valida que el nonce exista en
+    /// DynamoDB, no haya expirado y no haya sido usado antes, y lo consume.
+    /// No se adjunta ninguna firma calculada en el cliente.
+    /// </summary>
+    public void VerifyDataAtStartup(string rawTelemetryJson, Action onVerificationDone)
+    {
+        string idToken = PlayerPrefs.GetString("CognitoIdToken");
+        if (string.IsNullOrEmpty(idToken)) return;
+
+        // Primero pedimos un nonce fresco, luego enviamos la verificación
+        RequestNonce((nonce) =>
+        {
+            VerifyPayload payload = new VerifyPayload
+            {
+                data         = rawTelemetryJson,
+                sessionToken = _currentSessionToken,
+                nonce        = nonce
+                // Sin campo 'signature': la autoridad la da el nonce, no el cliente
+            };
+
+            string finalPayload = JsonUtility.ToJson(payload);
+            StartCoroutine(SendVerifyRequest(finalPayload, idToken, onVerificationDone));
+        });
+    }
+
+    private IEnumerator SendVerifyRequest(string jsonPayload, string token, Action onVerificationDone)
+    {
+        byte[] bodyRaw = System.Text.Encoding.UTF8.GetBytes(jsonPayload);
+
+        UnityWebRequest request = new UnityWebRequest(VerifyApiUrl, "POST");
+        request.uploadHandler = new UploadHandlerRaw(bodyRaw);
+        request.downloadHandler = new DownloadHandlerBuffer();
+        request.SetRequestHeader("Content-Type", "application/json");
+        request.SetRequestHeader("Authorization", token);
+
+        Debug.Log("Enviando telemetría local a AWS para verificación...");
+
+        yield return request.SendWebRequest();
+
+        if (request.result == UnityWebRequest.Result.Success)
+        {
+            LambdaResponse response = JsonUtility.FromJson<LambdaResponse>(request.downloadHandler.text);
+            Debug.Log("Veredicto de AWS: " + request.downloadHandler.text);
+
+            if (response != null)
+            {
+                if (response.code == "SESSION_EXPIRED")
+                {
+                    Debug.LogError("⛔ SESIÓN CADUCADA. Has iniciado sesión en otro dispositivo.");
+                    PlayerPrefs.DeleteKey("CognitoIdToken");
+                    PlayerPrefs.DeleteKey("CognitoAccessToken");
+                    PlayerPrefs.DeleteKey("CognitoRefreshToken");
+                    SceneManager.LoadScene("LoginScene");
+                    yield break;
+                }
+                else if (response.code == "NONCE_INVALID")
+                {
+                    // El nonce no existía, ya fue usado, o expiró: posible replay attack
+                    Debug.LogError("⛔ NONCE INVÁLIDO. Solicitud rechazada por el servidor.");
+                    yield break;
+                }
+                else if (response.code == "BANNED")      Debug.LogError("⛔ TRAMPA DETECTADA. Cuenta reseteada a 0.");
+                else if (response.code == "FORCE_CLOUD") Debug.Log("☁️ Archivo local sospechoso. Se usará la nube.");
+                else                                      Debug.Log("✅ Datos verificados. Todo en orden.");
+            }
+        }
+        else
+        {
+            Debug.LogError("Error conectando con el Juez: " + request.error);
+        }
+
+        onVerificationDone?.Invoke();
+    }
+
+    // ─── Guardado y carga (sin cambios de lógica) ─────────────────────────────
+
+    public void SaveGameData(int score, float timePlayed)
     {
         string idToken = PlayerPrefs.GetString("CognitoIdToken");
         string username = PlayerPrefs.GetString("CognitoUsername", "UnknownUser");
 
         if (string.IsNullOrEmpty(idToken)) return;
         if (_ddbClient == null) InitClient(idToken);
-        
-        // Si no tenemos Ticket de sesión, abortamos para no corromper datos
         if (string.IsNullOrEmpty(_currentSessionToken)) return;
 
         var request = new PutItemRequest
@@ -124,14 +245,13 @@ public void SaveGameData(int score, float timePlayed)
             TableName = TableName,
             Item = new Dictionary<string, AttributeValue>
             {
-                { "UserId", new AttributeValue { S = username } },
-                { "Score", new AttributeValue { N = score.ToString(CultureInfo.InvariantCulture) } },
-                { "TimePlayed", new AttributeValue { N = timePlayed.ToString("F2", CultureInfo.InvariantCulture) } },
-                { "IPAddress", new AttributeValue { S = _publicIP } },
-                { "LastUpdated", new AttributeValue { S = DateTime.UtcNow.ToString("o") } },             
+                { "UserId",             new AttributeValue { S = username } },
+                { "Score",              new AttributeValue { N = score.ToString(CultureInfo.InvariantCulture) } },
+                { "TimePlayed",         new AttributeValue { N = timePlayed.ToString("F2", CultureInfo.InvariantCulture) } },
+                { "IPAddress",          new AttributeValue { S = _publicIP } },
+                { "LastUpdated",        new AttributeValue { S = DateTime.UtcNow.ToString("o") } },
                 { "ActiveSessionToken", new AttributeValue { S = _currentSessionToken } }
             },
-            
             ConditionExpression = "attribute_not_exists(ActiveSessionToken) OR ActiveSessionToken = :myToken",
             ExpressionAttributeValues = new Dictionary<string, AttributeValue>
             {
@@ -147,14 +267,14 @@ public void SaveGameData(int score, float timePlayed)
                 {
                     Debug.LogError("SESIÓN CADUCADA DURANTE EL GUARDADO. Alguien ha entrado a tu cuenta.");
                     PlayerPrefs.DeleteKey("CognitoIdToken");
-                    UnityEngine.SceneManagement.SceneManager.LoadScene("LoginScene"); 
+                    UnityEngine.SceneManagement.SceneManager.LoadScene("LoginScene");
                 }
                 else
                 {
                     Debug.LogError("Error guardando: " + result.Exception.Message);
                 }
             }
-            else 
+            else
             {
                 Debug.Log("✅ Guardado en la nube validado. Eres el jugador activo.");
             }
@@ -167,7 +287,6 @@ public void SaveGameData(int score, float timePlayed)
         string username = PlayerPrefs.GetString("CognitoUsername", "UnknownUser");
 
         if (string.IsNullOrEmpty(idToken)) return;
-
         if (_ddbClient == null) InitClient(idToken);
 
         Debug.Log($"Cargando datos de {username}...");
@@ -186,13 +305,10 @@ public void SaveGameData(int score, float timePlayed)
                 int loadedScore = 0;
                 float loadedTime = 0f;
 
-                // Parsear datos de DynamoDB
-                if (item.ContainsKey("Score")) int.TryParse(item["Score"].N, out loadedScore);
+                if (item.ContainsKey("Score"))      int.TryParse(item["Score"].N, out loadedScore);
                 if (item.ContainsKey("TimePlayed")) float.TryParse(item["TimePlayed"].N, out loadedTime);
 
                 Debug.Log($"✅ DATOS RECIBIDOS: Score {loadedScore} | Tiempo {loadedTime}");
-
-                // Devolver datos al juego
                 onLoadedCallback?.Invoke(loadedScore, loadedTime);
             }
             else
@@ -206,129 +322,44 @@ public void SaveGameData(int score, float timePlayed)
     {
         if (_credentials != null)
         {
-            // Esto borra el Identity ID cacheado en el dispositivo
-            _credentials.Clear(); 
+            _credentials.Clear();
             _credentials = null;
         }
-
         _ddbClient = null;
         Debug.Log("🔒 AWS Credentials limpiadas correctamente.");
     }
 
-private void InitClient(string idToken)
+    private void InitClient(string idToken)
     {
         _credentials = new CognitoAWSCredentials(IdentityPoolId, _Region);
-        _credentials.Clear(); 
-        
+        _credentials.Clear();
         _credentials.AddLogin("cognito-idp.eu-north-1.amazonaws.com/" + UserPoolId, idToken);
         _ddbClient = new AmazonDynamoDBClient(_credentials, _Region);
     }
 
-    // Anti Verdejos
-   public void VerifyDataAtStartup(string envelopeJson, Action onVerificationDone)
-    {
-        string idToken = PlayerPrefs.GetString("CognitoIdToken");
-        if (string.IsNullOrEmpty(idToken)) return;
-
-        // Abrimos el sobre que viene del PC, le metemos el Ticket de la sesión, y lo volvemos a cerrar
-        SecurePayload payload = JsonUtility.FromJson<SecurePayload>(envelopeJson);
-        payload.sessionToken = _currentSessionToken; 
-        
-        string finalPayload = JsonUtility.ToJson(payload);
-
-        StartCoroutine(SendVerifyRequest(finalPayload, idToken, onVerificationDone));
-    }
-
-   private IEnumerator SendVerifyRequest(string jsonPayload, string token, Action onVerificationDone)
-    {
-        byte[] bodyRaw = System.Text.Encoding.UTF8.GetBytes(jsonPayload);
-        
-        UnityWebRequest request = new UnityWebRequest(VerifyApiUrl, "POST");
-        request.uploadHandler = new UploadHandlerRaw(bodyRaw);
-        request.downloadHandler = new DownloadHandlerBuffer();
-        
-        request.SetRequestHeader("Content-Type", "application/json");
-        request.SetRequestHeader("Authorization", token); // El Token de Cognito es tu pase de seguridad
-
-        Debug.Log("🕵️ Enviando JSON local a AWS para verificación...");
-        
-        yield return request.SendWebRequest();
-
-        if (request.result == UnityWebRequest.Result.Success)
-        {
-            string responseJson = request.downloadHandler.text;
-            Debug.Log("Veredicto de AWS: " + responseJson);
-
-            // Leemos qué ha decidido la Lambda
-            LambdaResponse response = JsonUtility.FromJson<LambdaResponse>(responseJson);
-
-            if (response != null)
-            {
-                if (response.code == "SESSION_EXPIRED")
-                {
-                    Debug.LogError("⛔ SESIÓN CADUCADA. Has iniciado sesión en otro dispositivo.");
-                    
-                    // 1. Borramos los tokens guardados para forzarle a loguearse de nuevo
-                    PlayerPrefs.DeleteKey("CognitoIdToken");
-                    PlayerPrefs.DeleteKey("CognitoAccessToken");
-                    PlayerPrefs.DeleteKey("CognitoRefreshToken");
-                    
-                    // 2. Le mandamos de vuelta a la escena de Login (Asegúrate de poner el nombre exacto de tu escena)
-                    UnityEngine.SceneManagement.SceneManager.LoadScene("LoginScene");
-                    
-                    // 3. DETENEMOS el código aquí para que no intente cargar la partida
-                    yield break; 
-                }
-
-                else if (response.code == "BANNED") Debug.LogError("⛔ TRAMPA DETECTADA. Cuenta reseteada a 0 en la nube.");
-                else if (response.code == "FORCE_CLOUD") Debug.Log("☁️ Archivo local desactualizado o sospechoso. Se usará la nube.");
-                else Debug.Log("✅ Datos verificados. Todo en orden.");
-            }
-        }
-        else
-        {
-            Debug.LogError("Error conectando con el Juez: " + request.error);
-        }
-
-        // Una vez que AWS responde (y castiga si hace falta), le decimos a Unity que ya puede cargar DynamoDB
-        onVerificationDone?.Invoke();
-    }
-    
-    public string CalculateHMAC(string text)
-    {
-        byte[] keyBytes = Encoding.UTF8.GetBytes(SECRET_HMAC_KEY);
-        byte[] textBytes = Encoding.UTF8.GetBytes(text);
-        
-        using (HMACSHA256 hmac = new HMACSHA256(keyBytes))
-        {
-            byte[] hashBytes = hmac.ComputeHash(textBytes);
-            return Convert.ToBase64String(hashBytes);
-        }
-    }
-
-    // Este método nativo de Unity se ejecuta justo antes de que la ventana del juego se cierre por completo
     void OnApplicationQuit()
     {
         string idToken = PlayerPrefs.GetString("CognitoIdToken");
-        
+
         if (!string.IsNullOrEmpty(idToken) && !string.IsNullOrEmpty(_currentSessionToken))
         {
             Debug.Log("🧹 El juego se está cerrando. Liberando la cuenta en AWS...");
-            
+
             string jsonPayload = $"{{\"action\":\"unregister\"}}";
             byte[] bodyRaw = System.Text.Encoding.UTF8.GetBytes(jsonPayload);
-            
+
             UnityWebRequest request = new UnityWebRequest(RegisterSessionUrl, "POST");
             request.uploadHandler = new UploadHandlerRaw(bodyRaw);
             request.downloadHandler = new DownloadHandlerBuffer();
             request.SetRequestHeader("Content-Type", "application/json");
             request.SetRequestHeader("Authorization", idToken);
-            
-            // Lo enviamos directo sin 'yield' porque el juego se muere en este instante
-            request.SendWebRequest(); 
+
+            request.SendWebRequest();
         }
     }
 }
+
+// ─── DTOs ─────────────────────────────────────────────────────────────────────
 
 [Serializable]
 public class LambdaResponse
@@ -338,9 +369,30 @@ public class LambdaResponse
 }
 
 [Serializable]
+public class NonceResponse
+{
+    public string nonce; // UUID generado y almacenado por el servidor
+}
+
+/// <summary>
+/// Payload enviado a /verify-stats.
+/// Sustituye a SecurePayload: sin campo 'signature' (eliminado),
+/// con campo 'nonce' que el servidor habrá emitido segundos antes.
+/// </summary>
+[Serializable]
+public class VerifyPayload
+{
+    public string data;         // JSON de telemetría (SessionTelemetry serializado)
+    public string sessionToken; // ticket de sesión activa
+    public string nonce;        // nonce de un solo uso emitido por el servidor
+}
+
+// SecurePayload se mantiene solo para compatibilidad con archivos locales
+// guardados antes de esta migración. No se usa para nuevas verificaciones.
+[Serializable]
 public class SecurePayload
 {
-    public string data;      // texto íntegro de tu session_telemetry.json
-    public string signature; // firma de seguridad (Hash HMAC)
-    public string sessionToken; // el Ticket de Sesión
+    public string data;
+    public string signature;
+    public string sessionToken;
 }
