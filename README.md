@@ -26,9 +26,9 @@ This Final Degree Project (TFG) was developed at the **Universidad Complutense d
 - [ ] Eliminar `// HABRÍA QUE MENCIONAR EN ESTE CAPÍTULO MÁS SOBRE EL IaC...` (pág. 30)
 - [ ] Eliminar `(Dar una vuelta a este párrafo)` y reescribir el párrafo afectado (pág. 30)
 - [ ] Eliminar `// esto hay que quitar porque se soluciona en la sección 4.1` (pág. 35)
-- [ ] Eliminar TODO el bloque `"Como abordaría este capítulo..."` (pág. 43)
-- [ ] Eliminar la respuesta del tutor `"Respuesta de Poletti: La idea es que..."` (pág. 43)
-- [ ] Revisar el documento completo en busca de cualquier otra nota interna o comentario de edición que haya quedado
+- [X] Eliminar TODO el bloque `"Como abordaría este capítulo..."` (pág. 43)
+- [X] Eliminar la respuesta del tutor `"Respuesta de Poletti: La idea es que..."` (pág. 43)
+- [ ] Revisar el documento completo en busca de cualquier otra nota interna o comentario de edición que haya quedado 
 
 ### Política bilingüe
 - [X] Decidir si el documento es en español o bilingüe
@@ -38,7 +38,7 @@ This Final Degree Project (TFG) was developed at the **Universidad Complutense d
 ### Clave secreta embebida en el cliente Unity (pág. 35)
 - [ ] Replantear el mecanismo de la clave secreta embebida mediante ofuscación — contradice el principio de trasladar la autoridad al servidor
 - [ ] Sustituir por una alternativa coherente: validación server-side, tokens efímeros, nonces, firma asimétrica u otra solución que no dependa de un secreto residente en el cliente
-
+23/04/2026
 ---
 
 ## 🟠 PRIORIDAD 2 — Capítulo 5 (Casos de uso)
@@ -61,10 +61,12 @@ This Final Degree Project (TFG) was developed at the **Universidad Complutense d
 - [ ] Sustituir `"evidencias irrefutables"` por `"evidencias auditables"` o `"trazas verificables"`
 - [ ] Reformular `"la pérdida de todo su progreso como castigo"` en términos técnicos: revocación, invalidación, medida automática ante manipulación detectada
 - [ ] Sustituir `"de manera eficiente, sencilla, gratis o a bajo coste"` por `"con un coste operativo reducido"` (pág. 50)
-- [ ] Hacer que cada conclusión importante remita explícitamente a un resultado observado en el capítulo 5
+
 - [ ] Ampliar el trabajo futuro con líneas concretas: carga, latencia, coste, mejora del cliente, refuerzo de observabilidad, automatización, reproducibilidad, ampliación del modelo de pruebas
 - [ ] Mejorar la maquetación de la página 50 para que el cierre no quede visualmente pobre
 
+
+- [ ] Hacer que cada conclusión importante remita explícitamente a un resultado observado en el capítulo 5
 ---
 
 ## 🟡 PRIORIDAD 3 — Revisiones por capítulo
@@ -101,8 +103,8 @@ This Final Degree Project (TFG) was developed at the **Universidad Complutense d
 ## 🔵 PRIORIDAD 4 — Pasada de estilo y uniformidad
 
 ### Erratas y nombres propios
-- [ ] Corregir `"BattelEye"` → `"BattlEye"` (pág. 5)
-- [ ] Corregir `"includo"` → `"incluso"` (pág. 18)
+- [X] Corregir `"BattelEye"` → `"BattlEye"` (pág. 5)
+- [X] Corregir `"includo"` → `"incluso"` (pág. 18)
 - [ ] Uniformar `"Amazon Cloudwatch"` / `"Cloudwatch"` / `"cloudwatch"` → `"Amazon CloudWatch"` / `"CloudWatch"` en todo el documento (págs. 18, 42 y cualquier otra aparición)
 - [ ] Corregir `"Des esta forma Cloudwatch..."` → `"De esta forma, CloudWatch..."` (pág. 18)
 - [ ] Expandir `"RPS"` en su primera aparición: `"RPS (Requests Per Second)"` — eliminar la nota `"(Explicar siglas arriba)"` (pág. 25)
