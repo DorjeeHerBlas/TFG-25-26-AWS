@@ -43,7 +43,7 @@ This Final Degree Project (TFG) was developed at the **Universidad Complutense d
 
 ## 🟠 PRIORIDAD 2 — Capítulo 5 (Casos de uso)
 
-- [ ] Reescribir completamente la apertura del capítulo para que empiece como texto final de memoria, no como planificación interna (pág. 43)
+- [X] Reescribir completamente la apertura del capítulo para que empiece como texto final de memoria, no como planificación interna (pág. 43)
 - [ ] Estructurar cada caso de uso con estas cuatro piezas claramente separadas:
   - [ ] Escenario
   - [ ] Ejecución
