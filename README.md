@@ -62,17 +62,17 @@ This Final Degree Project (TFG) was developed at the **Universidad Complutense d
 - [X] Reformular `"la pérdida de todo su progreso como castigo"` en términos técnicos: revocación, invalidación, medida automática ante manipulación detectada
 - [X] Sustituir `"de manera eficiente, sencilla, gratis o a bajo coste"` por `"con un coste operativo reducido"` (pág. 50)
 
-- [ ] Ampliar el trabajo futuro con líneas concretas: carga, latencia, coste, mejora del cliente, refuerzo de observabilidad, automatización, reproducibilidad, ampliación del modelo de pruebas
-- [ ] Mejorar la maquetación de la página 50 para que el cierre no quede visualmente pobre
+- [X] Ampliar el trabajo futuro con líneas concretas: carga, latencia, coste, mejora del cliente, refuerzo de observabilidad, automatización, reproducibilidad, ampliación del modelo de pruebas
+- [X] Mejorar la maquetación de la página 50 para que el cierre no quede visualmente pobre
 
 
-- [ ] Hacer que cada conclusión importante remita explícitamente a un resultado observado en el capítulo 5
+- [X] Hacer que cada conclusión importante remita explícitamente a un resultado observado en el capítulo 5
 ---
 
 ## 🟡 PRIORIDAD 3 — Revisiones por capítulo
 
 ### Introducción
-- [ ] Revisar las frases que apoyan una afirmación fuerte en un caso muy reciente o periodístico (pág. 5)
+- [X] Revisar las frases que apoyan una afirmación fuerte en un caso muy reciente o periodístico (pág. 5)
 - [X] Reformular `"Sin ir más lejos en febrero de 2026..."` con un arranque más neutro, por ejemplo: *"Como ejemplo reciente..."* o *"Un caso documentado recientemente..."* (pág. 5)
 
 ### Estado de la cuestión
@@ -120,7 +120,7 @@ This Final Degree Project (TFG) was developed at the **Universidad Complutense d
 
 ## 📚 Bibliografía
 
-- [ ] Corregir entradas mal formadas — especialmente las que dejan visible texto tipo `"Title:"` o URLs mal integradas
+- [X] Corregir entradas mal formadas — especialmente las que dejan visible texto tipo `"Title:"` o URLs mal integradas
 - [ ] Verificar la trazabilidad de todas las citas: que no haya referencias sin citar ni citas sin entrada bibliográfica
 - [ ] Priorizar artículos, normas, documentación oficial y literatura académica para sostener el estado del arte y las afirmaciones metodológicas
 - [ ] Mover blogs, noticias y tutoriales sin autoría clara a notas a pie de página; no usarlos como base principal del aparato crítico
@@ -129,7 +129,7 @@ This Final Degree Project (TFG) was developed at the **Universidad Complutense d
 
 ## 📎 Anexos (opcionales pero recomendados)
 
-- [ ] Añadir anexo con ejemplos de logs o eventos observados en CloudWatch
+- [X] Añadir anexo con ejemplos de logs o eventos observados en CloudWatch
 - [ ] Valorar añadir un anexo breve con JSON schemas, endpoints principales o tablas de DynamoDB resumidas
 - [ ] Mover a anexo cualquier material técnico que da contexto y evidencia pero recargaría el cuerpo principal
 
@@ -139,8 +139,8 @@ This Final Degree Project (TFG) was developed at the **Universidad Complutense d
 
 - [ ] No quedan notas internas ni comentarios del tutor en ninguna página
 - [ ] Todas las siglas están expandidas en su primera aparición
-- [ ] `CloudWatch`, `BattlEye` y demás nombres técnicos son uniformes en todo el documento
-- [ ] No hay palabras absolutas sin respaldo documental (*infalible, irrefutable*, etc.)
+- [X] `CloudWatch`, `BattlEye` y demás nombres técnicos son uniformes en todo el documento
+- [X] No hay palabras absolutas sin respaldo documental (*infalible, irrefutable*, etc.)
 - [ ] Todas las figuras tienen explicación en el texto (no solo están insertadas)
 - [ ] El capítulo 5 contiene evidencia observada real y una síntesis de validación
 - [ ] Las conclusiones remiten explícitamente a resultados del capítulo 5
