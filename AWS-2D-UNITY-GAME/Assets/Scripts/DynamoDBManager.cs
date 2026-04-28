@@ -161,6 +161,8 @@ public class DynamoDBManager : MonoBehaviour
     /// </summary>
     public void VerifyDataAtStartup(string rawTelemetryJson, Action onVerificationDone)
     {
+         Debug.Log("RAW TELEMETRY ENVIADO: " + rawTelemetryJson.Substring(0, 100));
+   
         string idToken = PlayerPrefs.GetString("CognitoIdToken");
         if (string.IsNullOrEmpty(idToken)) return;
 
