@@ -30,6 +30,12 @@ public class DynamoDBManager : MonoBehaviour
     private CognitoAWSCredentials _credentials;
     private string _publicIP = "Unknown";
 
+    // Flag para coordinar el cierre con la corrutina de unregister.
+    // Application.wantsToQuit nos permite bloquear el cierre hasta que la
+    // peticion HTTP termine; OnApplicationQuit no permite eso porque no es
+    // corrutina y la app muere en milisegundos.
+    private bool _readyToQuit = false;
+
     void Awake()
     {
         UnityInitializer.AttachToGameObject(this.gameObject);
@@ -39,6 +45,7 @@ public class DynamoDBManager : MonoBehaviour
         {
             Instance = this;
             DontDestroyOnLoad(gameObject);
+            Application.wantsToQuit += OnWantsToQuit;
         }
         else
         {
@@ -218,9 +225,31 @@ public class DynamoDBManager : MonoBehaviour
                     Debug.LogError("⛔ NONCE INVÁLIDO. Solicitud rechazada por el servidor.");
                     yield break;
                 }
-                else if (response.code == "BANNED")      Debug.LogError("⛔ TRAMPA DETECTADA. Cuenta reseteada a 0.");
-                else if (response.code == "FORCE_CLOUD") Debug.Log("☁️ Archivo local sospechoso. Se usará la nube.");
-                else                                      Debug.Log("✅ Datos verificados. Todo en orden.");
+                else if (response.code == "PERMANENT_BANNED")
+                {
+                    Debug.LogError("BAN PERMANENTE. Cuenta revocada.");
+                    PlayerPrefs.DeleteKey("CognitoIdToken");
+                    PlayerPrefs.DeleteKey("CognitoAccessToken");
+                    PlayerPrefs.DeleteKey("CognitoRefreshToken");
+                    SceneManager.LoadScene("LoginScene");
+                    yield break;
+                }
+                else if (response.code == "CHEAT_WARNING")
+                {
+                    Debug.LogError("TRAMPA DETECTADA. Stats reseteadas a 0.");
+                }
+                else if (response.code == "FORCE_CLOUD")
+                {
+                    Debug.Log("Archivo local sospechoso. Se usara la nube.");
+                }
+                else if (response.code == "NEW_USER")
+                {
+                    Debug.Log("Usuario nuevo registrado.");
+                }
+                else
+                {
+                    Debug.Log("Datos verificados. Todo en orden.");
+                }
             }
         }
         else
@@ -339,25 +368,60 @@ public class DynamoDBManager : MonoBehaviour
         _ddbClient = new AmazonDynamoDBClient(_credentials, _Region);
     }
 
-    void OnApplicationQuit()
+    /// <summary>
+    /// Se invoca cuando Unity quiere cerrar la app. Si devolvemos false,
+    /// el cierre se ABORTA. Lanzamos la corrutina de unregister y solo
+    /// dejamos cerrar cuando termina (o cuando se cumple el timeout).
+    /// Sin esto, request.SendWebRequest() se queda a medias porque la app
+    /// muere antes de que el TCP llegue al destino.
+    /// </summary>
+    private bool OnWantsToQuit()
     {
+        if (_readyToQuit) return true;
+
         string idToken = PlayerPrefs.GetString("CognitoIdToken");
-
-        if (!string.IsNullOrEmpty(idToken) && !string.IsNullOrEmpty(_currentSessionToken))
+        if (string.IsNullOrEmpty(idToken) || string.IsNullOrEmpty(_currentSessionToken))
         {
-            Debug.Log("🧹 El juego se está cerrando. Liberando la cuenta en AWS...");
-
-            string jsonPayload = $"{{\"action\":\"unregister\"}}";
-            byte[] bodyRaw = System.Text.Encoding.UTF8.GetBytes(jsonPayload);
-
-            UnityWebRequest request = new UnityWebRequest(RegisterSessionUrl, "POST");
-            request.uploadHandler = new UploadHandlerRaw(bodyRaw);
-            request.downloadHandler = new DownloadHandlerBuffer();
-            request.SetRequestHeader("Content-Type", "application/json");
-            request.SetRequestHeader("Authorization", idToken);
-
-            request.SendWebRequest();
+            // Nada que liberar.
+            return true;
         }
+
+        Debug.Log("Cerrando juego: liberando la cuenta en AWS...");
+        StartCoroutine(UnregisterAndQuit(idToken, _currentSessionToken));
+        return false; // bloquea el cierre hasta que la corrutina llame a Application.Quit()
+    }
+
+    private IEnumerator UnregisterAndQuit(string idToken, string sessionToken)
+    {
+        // Mandamos el sessionToken para que la Lambda RegisterSession entre
+        // en "modo seguro" y solo libere el slot si somos el dueno. Aunque
+        // esta peticion fallase, la stale-session-takeover de la Lambda
+        // recupera el slot tras STALE_SESSION_SECONDS.
+        string jsonPayload = $"{{\"action\":\"unregister\",\"sessionToken\":\"{sessionToken}\"}}";
+        byte[] bodyRaw = System.Text.Encoding.UTF8.GetBytes(jsonPayload);
+
+        UnityWebRequest request = new UnityWebRequest(RegisterSessionUrl, "POST");
+        request.uploadHandler = new UploadHandlerRaw(bodyRaw);
+        request.downloadHandler = new DownloadHandlerBuffer();
+        request.SetRequestHeader("Content-Type", "application/json");
+        request.SetRequestHeader("Authorization", idToken);
+        request.timeout = 5; // segundos, para no dejar al usuario esperando si AWS no responde
+
+        yield return request.SendWebRequest();
+
+        if (request.result == UnityWebRequest.Result.Success)
+        {
+            Debug.Log("Sesion liberada en AWS: " + request.downloadHandler.text);
+        }
+        else
+        {
+            Debug.LogWarning("No se pudo liberar la sesion (" + request.error +
+                             "). El slot caducara solo en ~30 min.");
+        }
+
+        // Independientemente de si fue OK o no, dejamos cerrar la app.
+        _readyToQuit = true;
+        Application.Quit();
     }
 }
 

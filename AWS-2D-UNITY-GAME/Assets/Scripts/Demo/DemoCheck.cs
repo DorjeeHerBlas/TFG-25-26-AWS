@@ -1,46 +1,55 @@
-using System;
 using System.Collections;
-using System.IO;
-using System.Security.Cryptography;
-using System.Text;
-using TMPro;
 using UnityEngine;
 using UnityEngine.Networking;
 using UnityEngine.SceneManagement;
 
 public class DemoCheck : MonoBehaviour
 {
-    // Cron髆etro para volver a llamar al m閠odo, evitando que se juegue con versiones vencidas en sesiones largas
+    // Cron贸metro para volver a llamar al m茅todo, evitando que se juegue
+    // con versiones vencidas en sesiones largas.
     private float chrono = 0.0f;
     [SerializeField]
     private float checkTimer = 10.0f;
+
+    private const string DemoCheckUrl = "https://lb6pg6fy60.execute-api.eu-north-1.amazonaws.com/prod/demoCheck";
+
     IEnumerator CheckAccess()
     {
-        // Url de api Gateway 
-        UnityWebRequest request = UnityWebRequest.Get("https://lb6pg6fy60.execute-api.eu-north-1.amazonaws.com/prod/demoCheck");
+        UnityWebRequest request = UnityWebRequest.Get(DemoCheckUrl);
         request.SetRequestHeader("Authorization", PlayerPrefs.GetString("CognitoIdToken"));
 
         yield return request.SendWebRequest();
 
-        if (request.responseCode != 200)
+        // En UnityWebRequest, un 403 tambi茅n marca result == ProtocolError.
+        // Para distinguir "el servidor me dijo que no" de "no llegu茅 al
+        // servidor" miramos responseCode:
+        //   - responseCode 0  -> no hubo respuesta (red ca铆da, DNS, etc.)
+        //   - responseCode != 0 y != 200 -> la Lambda nos rechaz贸
+        //   - responseCode == 200 -> OK
+        long status = request.responseCode;
+
+        if (status == 0)
         {
-            Debug.Log("Acceso denegado: " + request.downloadHandler.text);
-            //SceneManager.LoadScene("LoginScene");
+            // Fallo de red real: no echamos al usuario para evitar falsos
+            // positivos por wifi malo. El siguiente tick volver谩 a probar.
+            Debug.LogError("Error conexi贸n DemoCheck (sin respuesta): " + request.error);
             yield break;
         }
 
-
-        if (request.result != UnityWebRequest.Result.Success)
+        if (status != 200)
         {
-            Debug.Log("Error conexi髇: " + request.error);
-            //SceneManager.LoadScene("LoginScene"); ;
+            Debug.LogError($"Acceso denegado por DemoCheck (HTTP {status}): "
+                           + request.downloadHandler.text);
+            PlayerPrefs.DeleteKey("CognitoIdToken");
+            PlayerPrefs.DeleteKey("CognitoAccessToken");
+            PlayerPrefs.DeleteKey("CognitoRefreshToken");
+            SceneManager.LoadScene("LoginScene");
             yield break;
         }
 
         Debug.Log("Acceso permitido");
     }
 
-    // Start is called once before the first execution of Update after the MonoBehaviour is created
     void Start()
     {
         StartCoroutine(CheckAccess());
@@ -49,17 +58,21 @@ public class DemoCheck : MonoBehaviour
     private void Update()
     {
         chrono += Time.deltaTime;
-        if(chrono >= checkTimer)
+        if (chrono >= checkTimer)
         {
             chrono = 0.0f;
             StartCoroutine(CheckAccess());
         }
     }
 
-    // Llamada al cerrar la aplicaci髇 para actualizar los segundos y el 鷏timo epoch
+    // Al cerrar la aplicaci贸n, una corrutina NO llega a terminar antes de que
+    // Unity mate los hilos. Disparamos el request de forma "fire-and-forget"
+    // mediante UnityWebRequest directo (igual que hace DynamoDBManager).
     private void OnApplicationQuit()
     {
-        StartCoroutine(CheckAccess());
-        Debug.Log("Aplicaci髇 cerrada");
+        UnityWebRequest request = UnityWebRequest.Get(DemoCheckUrl);
+        request.SetRequestHeader("Authorization", PlayerPrefs.GetString("CognitoIdToken"));
+        request.SendWebRequest();
+        Debug.Log("Aplicaci贸n cerrada.");
     }
 }

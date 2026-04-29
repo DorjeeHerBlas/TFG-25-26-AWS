@@ -33,7 +33,7 @@ public class LoginController : MonoBehaviour
     // preferred_username
     string NICKNAME;
 
-    // contrase�a
+    // contraseña
     string PASSWORD;
 
     [SerializeField]
@@ -213,9 +213,10 @@ public class LoginController : MonoBehaviour
 
         if (request.result == UnityWebRequest.Result.Success)
         {
-            Debug.Log("Login Exitoso: " + request.downloadHandler.text);
-            
-            // Extracci�n de tokens del JSON de respuesta
+            // No logueamos el cuerpo de la respuesta porque contiene IdToken/AccessToken/RefreshToken.
+            Debug.Log("Login Exitoso.");
+
+            // Extracción de tokens del JSON de respuesta
             LoginResponse response = JsonUtility.FromJson<LoginResponse>(request.downloadHandler.text);
 
             // Guardamos el IdToken, AccessToken, Username y RefreshToken en PlayerPrefs (Persistencia)
@@ -237,7 +238,7 @@ public class LoginController : MonoBehaviour
         }
     }
 
-    // TO DO Se tiene que llamar cuando salte el error 401 al mandar datos, ahora mismo a la hora se dejar�a de poder mandar datos
+    // TO DO Se tiene que llamar cuando salte el error 401 al mandar datos, ahora mismo a la hora se dejaría de poder mandar datos
     // CORRUTINA PARA REFRESCAR LA SESIÓN
     IEnumerator RefreshSession()
     {
@@ -317,25 +318,23 @@ public void Logout()
     }
 
     // METODOS PARA PASAR TEXTOS DESDE INPUT FIELDS
+    // Importante: no logueamos los valores. La contraseña NUNCA debe ir a Player.log,
+    // y username/nickname/code tampoco aportan nada en producción.
     public void SetPassword(TMP_InputField pass)
     {
         PASSWORD = pass.text;
-        Debug.Log(PASSWORD);
     }
     public void SetUsername(TMP_InputField email)
     {
         USERNAME = email.text;
-        Debug.Log(USERNAME);
     }
     public void SetNickname(TMP_InputField nick)
     {
         NICKNAME = nick.text;
-        Debug.Log(USERNAME);
     }
     public void SetCode(TMP_InputField verCode)
     {
         CODE = verCode.text;
-        Debug.Log(CODE);
     }
 
 
