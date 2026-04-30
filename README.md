@@ -42,7 +42,7 @@ Revisar acrónimos y definir si no están.
 Simplificar sintáxis. (principalmente cap3)
 Leyendas en los gráficos
 Una vez hecho el cap 5 bien mirar si el 6 se puede apoyar más en este
-
+Revisar cursivas.
 
 ---
 # Lista de correcciones — Memoria TFG
