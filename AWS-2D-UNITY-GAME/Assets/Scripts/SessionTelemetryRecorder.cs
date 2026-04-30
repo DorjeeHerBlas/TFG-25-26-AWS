@@ -30,18 +30,13 @@ public class SessionTelemetryRecorder : MonoBehaviour
         public string sessionId;
         public string startedAtUtc;
         public string lastSavedAtUtc;
-
-        public float timePlayedSeconds;
-
-        public int score;
-        public int validKeyCount;
-
-        public float keysPerSecondAvg;
-        public float keysPerMinuteAvg;
-
-        public float keysPerSecondLast10;
-        public int keysPerMinuteLast60;
-
+        public float  timePlayedSeconds;
+        public int    score;
+        public int    validKeyCount;
+        public float  keysPerSecondAvg;
+        public float  keysPerMinuteAvg;
+        public float  keysPerSecondLast10;
+        public int    keysPerMinuteLast60;
         public string notes;
     }
 
@@ -52,9 +47,9 @@ public class SessionTelemetryRecorder : MonoBehaviour
         startRealtime = Time.realtimeSinceStartup;
         data = new SessionTelemetry
         {
-            sessionId      = Guid.NewGuid().ToString("N"),
-            startedAtUtc   = DateTime.UtcNow.ToString("o"),
-            score          = 0,
+            sessionId         = Guid.NewGuid().ToString("N"),
+            startedAtUtc      = DateTime.UtcNow.ToString("o"),
+            score             = 0,
             timePlayedSeconds = 0
         };
 
@@ -65,16 +60,8 @@ public class SessionTelemetryRecorder : MonoBehaviour
                 string latestLocalFile = GetLatestLocalSave();
                 if (!string.IsNullOrEmpty(latestLocalFile))
                 {
-                    // Leemos el sobre del disco y extraemos solo el JSON de telemetría.
-                    // El servidor ya no necesita la firma: el nonce actúa como prueba
-                    // de que este envío es legítimo y reciente.
-                    string envelopeJson = File.ReadAllText(latestLocalFile);
-                    LocalEnvelope envelope = JsonUtility.FromJson<LocalEnvelope>(envelopeJson);
-                    string rawTelemetry = (envelope != null && !string.IsNullOrEmpty(envelope.data))
-                        ? envelope.data
-                        : envelopeJson; // fallback: el archivo ya era solo telemetría plana
-
-                    DynamoDBManager.Instance.VerifyDataAtStartup(rawTelemetry, () => LoadCloudData());
+                    string jsonLocal = File.ReadAllText(latestLocalFile);
+                    DynamoDBManager.Instance.VerifyDataAtStartup(jsonLocal, () => LoadCloudData());
                 }
                 else
                 {
@@ -93,6 +80,7 @@ public class SessionTelemetryRecorder : MonoBehaviour
         DynamoDBManager.Instance.LoadData((puntosNube, tiempoNube) =>
         {
             data.score = puntosNube;
+            // data.timePlayedSeconds = tiempoNube; // si quieres sincronizar el tiempo también
             Debug.Log($"Progreso restaurado desde DynamoDB: {puntosNube} pts.");
         });
     }
@@ -111,8 +99,7 @@ public class SessionTelemetryRecorder : MonoBehaviour
 
     void OnDestroy()
     {
-        if (playerJump != null)
-            playerJump.OnJump -= OnRealJump;
+        if (playerJump != null) playerJump.OnJump -= OnRealJump;
     }
 
     void Update()
@@ -128,7 +115,7 @@ public class SessionTelemetryRecorder : MonoBehaviour
 
     private void OnApplicationQuit()
     {
-        dbManager.SaveGameData(data.score, data.timePlayedSeconds);
+        if (dbManager != null) dbManager.SaveGameData(data.score, data.timePlayedSeconds);
         SaveToDisk();
     }
 
@@ -154,10 +141,10 @@ public class SessionTelemetryRecorder : MonoBehaviour
 
     private void UpdateDerivedStats()
     {
-        float now    = Time.realtimeSinceStartup;
+        float now = Time.realtimeSinceStartup;
         float played = now - startRealtime;
-
         data.timePlayedSeconds = Mathf.Max(0f, played);
+
         PruneQueues(now);
 
         if (data.timePlayedSeconds > 0.0001f)
@@ -178,7 +165,6 @@ public class SessionTelemetryRecorder : MonoBehaviour
     private void UpdateDebugUI()
     {
         if (debugText == null) return;
-
         debugText.text =
             $"Score: {data.score}\n" +
             $"Time: {data.timePlayedSeconds:F1}s\n" +
@@ -189,29 +175,42 @@ public class SessionTelemetryRecorder : MonoBehaviour
             $"KPM last60: {data.keysPerMinuteLast60}";
     }
 
+    // ===== GUARDADO EN DISCO (FUNCIONA EN BUILD) =====
     public void SaveToDisk()
     {
-#if UNITY_EDITOR
         data.lastSavedAtUtc = DateTime.UtcNow.ToString("o");
 
         string timestamp    = DateTime.Now.ToString("yyyy-MM-dd_HH-mm-ss");
         string shortSession = data.sessionId.Substring(0, 6);
         string fileName     = $"{fileNamePrefix}{timestamp}_{shortSession}.json";
-        string path         = Path.Combine(GetSavePath(), fileName);
 
-        // Serializamos la telemetría plana — sin firma, sin secreto.
-        // La autenticidad del envío la garantiza el nonce que el servidor
-        // emitirá en el momento de la verificación, no algo calculado aquí.
+        string dir = GetSavePath();
+        if (!Directory.Exists(dir)) Directory.CreateDirectory(dir);
+
+        string path = Path.Combine(dir, fileName);
+
+        // 1. Datos en bruto
         string rawDataJson = JsonUtility.ToJson(data, prettyPrint: true);
 
-        // Guardamos un sobre mínimo: solo data. Mantenemos la estructura de
-        // objeto por si se añaden metadatos en el futuro (versión, plataforma…).
-        LocalEnvelope envelope = new LocalEnvelope { data = rawDataJson };
-        File.WriteAllText(path, JsonUtility.ToJson(envelope, prettyPrint: true));
+        // 2. Firma HMAC
+        string signature = "";
+        if (DynamoDBManager.Instance != null)
+            signature = DynamoDBManager.Instance.CalculateHMAC(rawDataJson);
 
-        Debug.Log($"Telemetría guardada en:\n{path}");
-#endif
+        // 3. Sobre seguro (sin nonce ni sessionToken aquí; se añaden al verificar)
+        SecurePayload envelope = new SecurePayload
+        {
+            data      = rawDataJson,
+            signature = signature
+        };
 
+        // 4. Escritura
+        string finalJsonToSave = JsonUtility.ToJson(envelope, prettyPrint: true);
+        File.WriteAllText(path, finalJsonToSave);
+
+        Debug.Log($"📄 Telemetría segura guardada en:\n{path}");
+
+        // 5. Guardado en la nube (igual que antes)
         if (DynamoDBManager.Instance != null && statsManager != null)
         {
             DynamoDBManager.Instance.SaveGameData(statsManager.score, statsManager.totalTimeAccumulated);
@@ -221,21 +220,16 @@ public class SessionTelemetryRecorder : MonoBehaviour
     public string GetSavePath()
     {
 #if UNITY_EDITOR
+        // En editor, guarda en la raíz del proyecto para verlo cómodo
         return Path.GetFullPath(Path.Combine(Application.dataPath, ".."));
 #else
+        // En build, carpeta persistente del usuario
         return Application.persistentDataPath;
 #endif
     }
 
-    public SessionTelemetry GetCurrentSnapshot() => data;
-}
-
-/// <summary>
-/// Formato del archivo local de telemetría.
-/// Solo contiene el JSON de datos — sin firma ni secreto.
-/// </summary>
-[Serializable]
-public class LocalEnvelope
-{
-    public string data;
+    public SessionTelemetry GetCurrentSnapshot()
+    {
+        return data;
+    }
 }
