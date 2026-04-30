@@ -15,6 +15,38 @@ This Final Degree Project (TFG) was developed at the **Universidad Complutense d
 ---
 
 # Korrekturen die wir vornehmen müssen
+Estado de la cuestión: Añadir un cierre comparativo claro entre DRM, anti-cheat centrado en cliente, validación server-side y observabilidad, para que el capítulo no quede solo como un recorrido descriptivo.
+Más citas académicas y menos webs secundarias.
+Introducir, si te encaja, una síntesis final de criterios de elección: qué resuelve cada enfoque, qué no resuelve y por qué tu arquitectura se coloca donde se coloca.
+
+Tecnologías utilizadas: hablar menos de AWS y de sus servicios en general y dejar más centrada la exposición en las decisiones que realmente utiliza el prototipo.
+Borrar y releer lo que queda de capítulo (IAC).
+
+Arquitectura y diseño: Revisar figuras a lo mejor hay que explicarlas más.
+Cambiar códigos http
+Photoshop figura 4.1 (SessionNonces)
+
+
+Casos de uso: Cada caso en: escenario, ejecución, evidencia observada e interpretación.
+Añadir resultados: logs, eventos, códigos devueltos, trazas en CloudWatch, ejemplos de rechazo, cambios de estado o capturas representativas.
+Incluir al menos una síntesis final del capítulo donde se vea qué ha quedado validado y con qué límites.
+
+Conclusiones y final: ¿poner links a los casos que se mencionan?
+
+Bibliografía: cita 14 (está en la página 43)
+corregir entradas (title, links obsoletos, bibliografía sin citar)
+menos webs más artículos académicos
+
+Anexo: JSON schemas
+
+
+La revisión final debería hacerse también con foco en grafías oficiales de herramientas y servicios, porque aquí un detalle pequeño sí da imagen de falta de pulido.
+Revisar acrónimos y definir si no están.
+Simplificar sintáxis. (principalmente cap3)
+Leyendas en los gráficos
+Una vez hecho el cap 5 bien mirar si el 6 se puede apoyar más en este
+
+
 ---
 # Lista de correcciones — Memoria TFG
 
