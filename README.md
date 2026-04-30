@@ -23,9 +23,6 @@ Tecnologías utilizadas: hablar menos de AWS y de sus servicios en general y dej
 Borrar y releer lo que queda de capítulo (IAC).
 
 Arquitectura y diseño: Revisar figuras a lo mejor hay que explicarlas más.
-Cambiar códigos http
-Photoshop figura 4.1 (SessionNonces)
-
 
 Casos de uso: Cada caso en: escenario, ejecución, evidencia observada e interpretación.
 Añadir resultados: logs, eventos, códigos devueltos, trazas en CloudWatch, ejemplos de rechazo, cambios de estado o capturas representativas.
