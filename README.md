@@ -24,10 +24,6 @@ Borrar y releer lo que queda de capítulo (IAC).
 
 Arquitectura y diseño: Revisar figuras a lo mejor hay que explicarlas más.
 
-Casos de uso: Cada caso en: escenario, ejecución, evidencia observada e interpretación.
-Añadir resultados: logs, eventos, códigos devueltos, trazas en CloudWatch, ejemplos de rechazo, cambios de estado o capturas representativas.
-Incluir al menos una síntesis final del capítulo donde se vea qué ha quedado validado y con qué límites.
-
 Conclusiones y final: ¿poner links a los casos que se mencionan?
 
 Bibliografía: cita 14 (está en la página 43)
