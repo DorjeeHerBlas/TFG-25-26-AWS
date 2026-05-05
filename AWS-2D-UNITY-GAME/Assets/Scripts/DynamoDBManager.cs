@@ -26,9 +26,9 @@ public class DynamoDBManager : MonoBehaviour
     // Endpoints
     private const string RegisterSessionUrl = "https://s83rvjyf5h.execute-api.eu-north-1.amazonaws.com/prod/register-session";
     private const string VerifyApiUrl       = "https://s83rvjyf5h.execute-api.eu-north-1.amazonaws.com/prod/verify-stats";
-    private const string RequestNonceUrl    = "https://s83rvjyf5h.execute-api.eu-north-1.amazonaws.com/prod/request-nonce"; 
+    private const string RequestNonceUrl    = "https://s83rvjyf5h.execute-api.eu-north-1.amazonaws.com/prod/request-nonce";
 
-    // ticket sesión actual
+    // ticket sesion actual
     private string _currentSessionToken;
     private IAmazonDynamoDB _ddbClient;
     private CognitoAWSCredentials _credentials;
@@ -36,6 +36,10 @@ public class DynamoDBManager : MonoBehaviour
 
     // Ahora se usa nonce, esta clave ahora es prescindible
     public const string SECRET_HMAC_KEY = "MiClaveSecretaAntiCheatTFG";
+
+    // Para cierre limpio sin perder el unregister.
+    private bool _isQuitting       = false;
+    private bool _unregisterDone   = false;
 
     void Awake()
     {
@@ -50,7 +54,11 @@ public class DynamoDBManager : MonoBehaviour
         else
         {
             Destroy(gameObject);
+            return;
         }
+
+        // Bloqueamos el quit hasta haber liberado el slot en AWS.
+        Application.wantsToQuit += OnWantsToQuit;
     }
 
     void Start()
@@ -95,6 +103,7 @@ public class DynamoDBManager : MonoBehaviour
             if (response.code == "SESSION_IN_USE")
             {
                 Debug.LogError("ACCESO DENEGADO: Tu cuenta ya está jugando en otro dispositivo.");
+                _currentSessionToken = null;
                 PlayerPrefs.DeleteKey("CognitoIdToken");
                 SceneManager.LoadScene("LoginScene");
                 yield break;
@@ -109,6 +118,9 @@ public class DynamoDBManager : MonoBehaviour
     }
 
 
+    // CAMBIO: ahora usa UpdateItem en vez de PutItem para no machacar
+    // SessionLastSeenAt / SessionStartedAt. La condicion sigue garantizando
+    // que solo el dueño del slot puede escribir (ActiveSessionToken == el mio).
     public void SaveGameData(int score, float timePlayed)
     {
         string idToken  = PlayerPrefs.GetString("CognitoIdToken");
@@ -118,32 +130,35 @@ public class DynamoDBManager : MonoBehaviour
         if (_ddbClient == null) InitClient(idToken);
         if (string.IsNullOrEmpty(_currentSessionToken)) return;
 
-        var request = new PutItemRequest
+        var request = new UpdateItemRequest
         {
             TableName = TableName,
-            Item = new Dictionary<string, AttributeValue>
+            Key = new Dictionary<string, AttributeValue>
             {
-                { "UserId",             new AttributeValue { S = username } },
-                { "Score",              new AttributeValue { N = score.ToString(CultureInfo.InvariantCulture) } },
-                { "TimePlayed",         new AttributeValue { N = timePlayed.ToString("F2", CultureInfo.InvariantCulture) } },
-                { "IPAddress",          new AttributeValue { S = _publicIP } },
-                { "LastUpdated",        new AttributeValue { S = DateTime.UtcNow.ToString("o") } },
-                { "ActiveSessionToken", new AttributeValue { S = _currentSessionToken } }
+                { "UserId", new AttributeValue { S = username } }
             },
-            ConditionExpression = "attribute_not_exists(ActiveSessionToken) OR ActiveSessionToken = :myToken",
+            UpdateExpression =
+                "SET Score = :s, TimePlayed = :t, IPAddress = :ip, LastUpdated = :lu",
+            ConditionExpression =
+                "ActiveSessionToken = :myToken",
             ExpressionAttributeValues = new Dictionary<string, AttributeValue>
             {
+                { ":s",       new AttributeValue { N = score.ToString(CultureInfo.InvariantCulture) } },
+                { ":t",       new AttributeValue { N = timePlayed.ToString("F2", CultureInfo.InvariantCulture) } },
+                { ":ip",      new AttributeValue { S = _publicIP } },
+                { ":lu",      new AttributeValue { S = DateTime.UtcNow.ToString("o") } },
                 { ":myToken", new AttributeValue { S = _currentSessionToken } }
             }
         };
 
-        _ddbClient.PutItemAsync(request, (result) =>
+        _ddbClient.UpdateItemAsync(request, (result) =>
         {
             if (result.Exception != null)
             {
                 if (result.Exception.Message.Contains("ConditionalCheckFailed") || result.Exception is ConditionalCheckFailedException)
                 {
                     Debug.LogError("SESIÓN CADUCADA DURANTE EL GUARDADO.");
+                    _currentSessionToken = null;
                     PlayerPrefs.DeleteKey("CognitoIdToken");
                     SceneManager.LoadScene("LoginScene");
                 }
@@ -180,7 +195,7 @@ public class DynamoDBManager : MonoBehaviour
                 var item = result.Response.Item;
                 int loadedScore = 0;
                 float loadedTime = 0f;
-                
+
 
                 if (item.ContainsKey("Score"))      int.TryParse(item["Score"].N, out loadedScore);
                 if (item.ContainsKey("TimePlayed")) float.TryParse(item["TimePlayed"].N, NumberStyles.Any, CultureInfo.InvariantCulture, out loadedTime);
@@ -297,6 +312,7 @@ public class DynamoDBManager : MonoBehaviour
                 if (response.code == "SESSION_EXPIRED")
                 {
                     Debug.LogError("SESIÓN CADUCADA.");
+                    _currentSessionToken = null;
                     PlayerPrefs.DeleteKey("CognitoIdToken");
                     PlayerPrefs.DeleteKey("CognitoAccessToken");
                     PlayerPrefs.DeleteKey("CognitoRefreshToken");
@@ -330,24 +346,56 @@ public class DynamoDBManager : MonoBehaviour
         }
     }
 
-    void OnApplicationQuit()
+    // CAMBIO: el unregister al cerrar ahora viaja con sessionToken, asi
+    // la Lambda solo libera el slot si realmente eres su dueño. Ademas
+    // bloqueamos el quit hasta que el request termine, para no perderlo.
+    private bool OnWantsToQuit()
     {
+        if (_unregisterDone) return true;
+
         string idToken = PlayerPrefs.GetString("CognitoIdToken");
-        if (!string.IsNullOrEmpty(idToken) && !string.IsNullOrEmpty(_currentSessionToken))
+        if (string.IsNullOrEmpty(idToken) || string.IsNullOrEmpty(_currentSessionToken))
         {
-            Debug.Log("Liberando la cuenta en AWS...");
-
-            string jsonPayload = "{\"action\":\"unregister\"}";
-            byte[] bodyRaw = Encoding.UTF8.GetBytes(jsonPayload);
-
-            UnityWebRequest request = new UnityWebRequest(RegisterSessionUrl, "POST");
-            request.uploadHandler   = new UploadHandlerRaw(bodyRaw);
-            request.downloadHandler = new DownloadHandlerBuffer();
-            request.SetRequestHeader("Content-Type", "application/json");
-            request.SetRequestHeader("Authorization", idToken);
-
-            request.SendWebRequest();
+            // Nada que liberar.
+            return true;
         }
+
+        if (!_isQuitting)
+        {
+            _isQuitting = true;
+            StartCoroutine(UnregisterAndQuit(idToken, _currentSessionToken));
+        }
+        return false; // Aborta el quit; lo relanzamos cuando termine.
+    }
+
+    private IEnumerator UnregisterAndQuit(string idToken, string sessionToken)
+    {
+        Debug.Log("Liberando la cuenta en AWS...");
+
+        string jsonPayload = $"{{\"action\":\"unregister\",\"sessionToken\":\"{sessionToken}\"}}";
+        byte[] bodyRaw = Encoding.UTF8.GetBytes(jsonPayload);
+
+        UnityWebRequest request = new UnityWebRequest(RegisterSessionUrl, "POST");
+        request.uploadHandler   = new UploadHandlerRaw(bodyRaw);
+        request.downloadHandler = new DownloadHandlerBuffer();
+        request.SetRequestHeader("Content-Type", "application/json");
+        request.SetRequestHeader("Authorization", idToken);
+        request.timeout = 5; // no bloquees el cierre indefinidamente
+
+        yield return request.SendWebRequest();
+
+        if (request.result != UnityWebRequest.Result.Success)
+        {
+            Debug.LogWarning("Unregister no confirmado: " + request.error +
+                             " (la red de seguridad stale-takeover liberará el slot).");
+        }
+        else
+        {
+            Debug.Log("Slot liberado correctamente.");
+        }
+
+        _unregisterDone = true;
+        Application.Quit();
     }
 }
 
