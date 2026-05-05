@@ -1,4 +1,5 @@
 using System;
+using TMPro;
 using UnityEngine;
 using UnityEngine.InputSystem;
 
@@ -9,6 +10,7 @@ public class JumpComponent : MonoBehaviour
     public bool isGrounded = true;
     [SerializeField]
     private Animator animator;
+    public TMP_Text jumpText;
 
     public event Action OnJump;
 
@@ -26,6 +28,7 @@ public class JumpComponent : MonoBehaviour
             isGrounded = false;
             animator.SetBool("isGrounded", isGrounded);
             OnJump?.Invoke(); // salto real
+            if(jumpText.enabled) jumpText.enabled = false;
         }
     }
 

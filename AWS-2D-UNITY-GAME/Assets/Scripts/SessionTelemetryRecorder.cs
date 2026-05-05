@@ -80,7 +80,7 @@ public class SessionTelemetryRecorder : MonoBehaviour
         DynamoDBManager.Instance.LoadData((puntosNube, tiempoNube) =>
         {
             data.score = puntosNube;
-            // data.timePlayedSeconds = tiempoNube; // si quieres sincronizar el tiempo también
+            data.timePlayedSeconds = tiempoNube; // si quieres sincronizar el tiempo también
             Debug.Log($"Progreso restaurado desde DynamoDB: {puntosNube} pts.");
         });
     }
@@ -142,8 +142,7 @@ public class SessionTelemetryRecorder : MonoBehaviour
     private void UpdateDerivedStats()
     {
         float now = Time.realtimeSinceStartup;
-        float played = now - startRealtime;
-        data.timePlayedSeconds = Mathf.Max(0f, played);
+        data.timePlayedSeconds += Time.deltaTime;
 
         PruneQueues(now);
 
@@ -208,7 +207,7 @@ public class SessionTelemetryRecorder : MonoBehaviour
         string finalJsonToSave = JsonUtility.ToJson(envelope, prettyPrint: true);
         File.WriteAllText(path, finalJsonToSave);
 
-        Debug.Log($"📄 Telemetría segura guardada en:\n{path}");
+        Debug.Log($"Telemetría segura guardada en:\n{path}");
 
         // 5. Guardado en la nube (igual que antes)
         if (DynamoDBManager.Instance != null && statsManager != null)

@@ -21,10 +21,8 @@ public class DemoCheck : MonoBehaviour
         yield return request.SendWebRequest();
 
         // En UnityWebRequest, un 403 también marca result == ProtocolError.
-        // Para distinguir "el servidor me dijo que no" de "no llegué al
-        // servidor" miramos responseCode:
-        //   - responseCode 0  -> no hubo respuesta (red caída, DNS, etc.)
-        //   - responseCode != 0 y != 200 -> la Lambda nos rechazó
+        //   - responseCode 0  -> no hubo respuesta
+        //   - responseCode != 0 y != 200 -> Lambda nos rechazó
         //   - responseCode == 200 -> OK
         long status = request.responseCode;
 
@@ -65,9 +63,6 @@ public class DemoCheck : MonoBehaviour
         }
     }
 
-    // Al cerrar la aplicación, una corrutina NO llega a terminar antes de que
-    // Unity mate los hilos. Disparamos el request de forma "fire-and-forget"
-    // mediante UnityWebRequest directo (igual que hace DynamoDBManager).
     private void OnApplicationQuit()
     {
         UnityWebRequest request = UnityWebRequest.Get(DemoCheckUrl);

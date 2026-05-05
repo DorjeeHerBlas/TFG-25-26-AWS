@@ -121,10 +121,7 @@ public class CheckHash : MonoBehaviour
     void Start()
     {
 #if DEVELOPMENT_BUILD || UNITY_EDITOR
-        // En el Editor o en builds marcadas "Development Build" saltamos el
-        // control de hash. Si no, cada rebuild rompe el flujo porque el
-        // SHA-256 del binario cambia y la tabla HistoricExeHashes solo
-        // acepta el hash registrado.
+        // Comentario para indicar que no se checkea el hash en editor ni devBuilds
         Debug.LogWarning("CheckHash: bypass activo (DEVELOPMENT_BUILD / Editor). " +
                          "El control de version solo se aplica en builds de release.");
 #else

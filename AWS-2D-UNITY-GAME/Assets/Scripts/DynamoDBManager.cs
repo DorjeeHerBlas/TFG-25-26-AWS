@@ -26,7 +26,7 @@ public class DynamoDBManager : MonoBehaviour
     // Endpoints
     private const string RegisterSessionUrl = "https://s83rvjyf5h.execute-api.eu-north-1.amazonaws.com/prod/register-session";
     private const string VerifyApiUrl       = "https://s83rvjyf5h.execute-api.eu-north-1.amazonaws.com/prod/verify-stats";
-    private const string RequestNonceUrl    = "https://s83rvjyf5h.execute-api.eu-north-1.amazonaws.com/prod/request-nonce"; // NUEVO
+    private const string RequestNonceUrl    = "https://s83rvjyf5h.execute-api.eu-north-1.amazonaws.com/prod/request-nonce"; 
 
     // ticket sesión actual
     private string _currentSessionToken;
@@ -34,6 +34,7 @@ public class DynamoDBManager : MonoBehaviour
     private CognitoAWSCredentials _credentials;
     private string _publicIP = "Unknown";
 
+    // Ahora se usa nonce, esta clave ahora es prescindible
     public const string SECRET_HMAC_KEY = "MiClaveSecretaAntiCheatTFG";
 
     void Awake()
@@ -64,7 +65,6 @@ public class DynamoDBManager : MonoBehaviour
         if (www.result == UnityWebRequest.Result.Success) _publicIP = www.downloadHandler.text;
     }
 
-    // ----------------- SESIÓN -----------------
 
     public void RegisterNewSession(Action onSessionRegistered)
     {
@@ -94,21 +94,20 @@ public class DynamoDBManager : MonoBehaviour
 
             if (response.code == "SESSION_IN_USE")
             {
-                Debug.LogError("⛔ ACCESO DENEGADO: Tu cuenta ya está jugando en otro dispositivo.");
+                Debug.LogError("ACCESO DENEGADO: Tu cuenta ya está jugando en otro dispositivo.");
                 PlayerPrefs.DeleteKey("CognitoIdToken");
                 SceneManager.LoadScene("LoginScene");
                 yield break;
             }
             else if (response.code == "OK")
             {
-                Debug.Log("✅ Tienes el control de la cuenta.");
+                Debug.Log("Tienes el control de la cuenta.");
                 onSuccess?.Invoke();
             }
         }
         else Debug.LogError("Error en registro de sesión: " + request.error);
     }
 
-    // ----------------- GUARDADO / CARGA -----------------
 
     public void SaveGameData(int score, float timePlayed)
     {
@@ -155,7 +154,7 @@ public class DynamoDBManager : MonoBehaviour
             }
             else
             {
-                Debug.Log("✅ Guardado validado en la nube.");
+                Debug.Log("Guardado validado en la nube.");
             }
         });
     }
@@ -181,11 +180,12 @@ public class DynamoDBManager : MonoBehaviour
                 var item = result.Response.Item;
                 int loadedScore = 0;
                 float loadedTime = 0f;
+                
 
                 if (item.ContainsKey("Score"))      int.TryParse(item["Score"].N, out loadedScore);
-                if (item.ContainsKey("TimePlayed")) float.TryParse(item["TimePlayed"].N, out loadedTime);
+                if (item.ContainsKey("TimePlayed")) float.TryParse(item["TimePlayed"].N, NumberStyles.Any, CultureInfo.InvariantCulture, out loadedTime);
 
-                Debug.Log($"✅ DATOS RECIBIDOS: Score {loadedScore} | Tiempo {loadedTime}");
+                Debug.Log($"DATOS RECIBIDOS: Score {loadedScore} | Tiempo {loadedTime}");
                 onLoadedCallback?.Invoke(loadedScore, loadedTime);
             }
             else
@@ -204,7 +204,7 @@ public class DynamoDBManager : MonoBehaviour
             _credentials = null;
         }
         _ddbClient = null;
-        Debug.Log("🔒 AWS Credentials limpiadas.");
+        Debug.Log("AWS Credentials limpiadas.");
     }
 
     private void InitClient(string idToken)
@@ -215,9 +215,7 @@ public class DynamoDBManager : MonoBehaviour
         _ddbClient = new AmazonDynamoDBClient(_credentials, _Region);
     }
 
-    // ----------------- ANTI-TRAMPAS -----------------
 
-    // NUEVO: pide un nonce de un solo uso al backend
     private IEnumerator RequestNonce(string token, Action<string> onNonceReady)
     {
         UnityWebRequest request = new UnityWebRequest(RequestNonceUrl, "POST");
@@ -285,7 +283,7 @@ public class DynamoDBManager : MonoBehaviour
         request.SetRequestHeader("Content-Type", "application/json");
         request.SetRequestHeader("Authorization", token);
 
-        Debug.Log("🕵️ Enviando JSON local a AWS para verificación...");
+        Debug.Log("Enviando JSON local a AWS para verificación...");
         yield return request.SendWebRequest();
 
         if (request.result == UnityWebRequest.Result.Success)
@@ -298,18 +296,18 @@ public class DynamoDBManager : MonoBehaviour
             {
                 if (response.code == "SESSION_EXPIRED")
                 {
-                    Debug.LogError("⛔ SESIÓN CADUCADA.");
+                    Debug.LogError("SESIÓN CADUCADA.");
                     PlayerPrefs.DeleteKey("CognitoIdToken");
                     PlayerPrefs.DeleteKey("CognitoAccessToken");
                     PlayerPrefs.DeleteKey("CognitoRefreshToken");
                     SceneManager.LoadScene("LoginScene");
                     yield break;
                 }
-                else if (response.code == "PERMANENT_BANNED") Debug.LogError("⛔ Cuenta baneada permanentemente.");
-                else if (response.code == "CHEAT_WARNING")    Debug.LogError("⚠️ Aviso de trampa: stats reseteadas.");
-                else if (response.code == "FORCE_CLOUD")      Debug.Log("☁️ Archivo local desactualizado, se usa la nube.");
-                else if (response.code == "NONCE_INVALID")    Debug.LogError("⚠️ Nonce inválido o caducado.");
-                else                                          Debug.Log("✅ Datos verificados.");
+                else if (response.code == "PERMANENT_BANNED") Debug.LogError("Cuenta baneada permanentemente.");
+                else if (response.code == "CHEAT_WARNING")    Debug.LogError("Aviso de trampa: stats reseteadas.");
+                else if (response.code == "FORCE_CLOUD")      Debug.Log("Archivo local desactualizado, se usa la nube.");
+                else if (response.code == "NONCE_INVALID")    Debug.LogError("Nonce inválido o caducado.");
+                else                                          Debug.Log("Datos verificados.");
             }
         }
         else
@@ -337,7 +335,7 @@ public class DynamoDBManager : MonoBehaviour
         string idToken = PlayerPrefs.GetString("CognitoIdToken");
         if (!string.IsNullOrEmpty(idToken) && !string.IsNullOrEmpty(_currentSessionToken))
         {
-            Debug.Log("🧹 Liberando la cuenta en AWS...");
+            Debug.Log("Liberando la cuenta en AWS...");
 
             string jsonPayload = "{\"action\":\"unregister\"}";
             byte[] bodyRaw = Encoding.UTF8.GetBytes(jsonPayload);
@@ -371,8 +369,8 @@ public class NonceResponse
 [Serializable]
 public class SecurePayload
 {
-    public string data;          // JSON íntegro de session_telemetry
+    public string data;          // JSON de session_telemetry
     public string signature;     // HMAC del data
-    public string sessionToken;  // Ticket de sesión
-    public string nonce;         // NUEVO: nonce de un solo uso
+    public string sessionToken;  // Ticket de sesion
+    public string nonce;         // nonce de un solo uso
 }

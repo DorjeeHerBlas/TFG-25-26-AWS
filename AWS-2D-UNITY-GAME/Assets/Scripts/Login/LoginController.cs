@@ -238,7 +238,6 @@ public class LoginController : MonoBehaviour
         }
     }
 
-    // TO DO Se tiene que llamar cuando salte el error 401 al mandar datos, ahora mismo a la hora se dejaría de poder mandar datos
     // CORRUTINA PARA REFRESCAR LA SESIÓN
     IEnumerator RefreshSession()
     {

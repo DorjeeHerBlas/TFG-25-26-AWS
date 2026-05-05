@@ -60,7 +60,7 @@ public class ScoreComponent : MonoBehaviour
         totalTimeAccumulated = cloudTime + currentSessionTime;
 
         // 3. ACTUALIZAR EL TEXTO DEL RELOJ
-        UpdateTimeText(totalTimeAccumulated);
+        //UpdateTimeText(totalTimeAccumulated);
     }
 
     private void OnDestroy()
