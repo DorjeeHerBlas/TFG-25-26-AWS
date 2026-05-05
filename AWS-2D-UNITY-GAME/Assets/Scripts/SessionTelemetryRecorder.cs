@@ -53,6 +53,8 @@ public class SessionTelemetryRecorder : MonoBehaviour
             timePlayedSeconds = 0
         };
 
+        if (dbManager == null) dbManager = DynamoDBManager.Instance;
+
         if (DynamoDBManager.Instance != null)
         {
             DynamoDBManager.Instance.RegisterNewSession(() =>
@@ -61,11 +63,11 @@ public class SessionTelemetryRecorder : MonoBehaviour
                 if (!string.IsNullOrEmpty(latestLocalFile))
                 {
                     string jsonLocal = File.ReadAllText(latestLocalFile);
-                    DynamoDBManager.Instance.VerifyDataAtStartup(jsonLocal, () => LoadCloudData());
+                    VerifyStartupData(jsonLocal);
                 }
                 else
                 {
-                    LoadCloudData();
+                    VerifyStartupData("");
                 }
             });
         }
@@ -79,10 +81,40 @@ public class SessionTelemetryRecorder : MonoBehaviour
     {
         DynamoDBManager.Instance.LoadData((puntosNube, tiempoNube) =>
         {
-            data.score = puntosNube;
-            data.timePlayedSeconds = tiempoNube; // si quieres sincronizar el tiempo también
+            ApplyCloudStats(puntosNube, tiempoNube);
             Debug.Log($"Progreso restaurado desde DynamoDB: {puntosNube} pts.");
         });
+    }
+
+    private void VerifyStartupData(string envelopeJson)
+    {
+        bool forceCloudApplied = false;
+        DynamoDBManager.Instance.VerifyDataAtStartup(
+            envelopeJson,
+            () =>
+            {
+                if (!forceCloudApplied) LoadCloudData();
+            },
+            (puntosNube, tiempoNube) =>
+            {
+                forceCloudApplied = true;
+                ApplyCloudStats(puntosNube, tiempoNube);
+                Debug.Log($"Progreso restaurado desde Lambda FORCE_CLOUD: {puntosNube} pts.");
+            });
+    }
+
+    private void ApplyCloudStats(int puntosNube, float tiempoNube)
+    {
+        float elapsedThisSession = Mathf.Max(0f, Time.realtimeSinceStartup - startRealtime);
+        data.score = puntosNube;
+        data.timePlayedSeconds = tiempoNube + elapsedThisSession;
+
+        if (statsManager != null)
+        {
+            statsManager.ApplyCloudStats(puntosNube, tiempoNube);
+        }
+
+        UpdateDebugUI();
     }
 
     private string GetLatestLocalSave()
@@ -107,7 +139,7 @@ public class SessionTelemetryRecorder : MonoBehaviour
         UpdateDerivedStats();
         UpdateDebugUI();
 
-        if (Keyboard.current != null && Keyboard.current.spaceKey.wasPressedThisFrame)
+        if (dbManager != null && Keyboard.current != null && Keyboard.current.spaceKey.wasPressedThisFrame)
         {
             dbManager.SaveGameData(data.score, data.timePlayedSeconds);
         }
@@ -116,7 +148,7 @@ public class SessionTelemetryRecorder : MonoBehaviour
     private void OnApplicationQuit()
     {
         if (dbManager != null) dbManager.SaveGameData(data.score, data.timePlayedSeconds);
-        SaveToDisk();
+        SaveToDisk(false);
     }
 
     private void OnRealJump()
@@ -175,7 +207,7 @@ public class SessionTelemetryRecorder : MonoBehaviour
     }
 
     // ===== GUARDADO EN DISCO (FUNCIONA EN BUILD) =====
-    public void SaveToDisk()
+    public void SaveToDisk(bool saveCloud = true)
     {
         data.lastSavedAtUtc = DateTime.UtcNow.ToString("o");
 
@@ -209,10 +241,10 @@ public class SessionTelemetryRecorder : MonoBehaviour
 
         Debug.Log($"Telemetría segura guardada en:\n{path}");
 
-        // 5. Guardado en la nube (igual que antes)
-        if (DynamoDBManager.Instance != null && statsManager != null)
+        // 5. Guardado en la nube con la misma telemetria que acabamos de firmar.
+        if (saveCloud && DynamoDBManager.Instance != null)
         {
-            DynamoDBManager.Instance.SaveGameData(statsManager.score, statsManager.totalTimeAccumulated);
+            DynamoDBManager.Instance.SaveGameData(data.score, data.timePlayedSeconds);
         }
     }
 

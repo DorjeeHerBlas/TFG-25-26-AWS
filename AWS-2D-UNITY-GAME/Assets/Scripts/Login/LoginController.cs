@@ -219,10 +219,14 @@ public class LoginController : MonoBehaviour
             // Extracción de tokens del JSON de respuesta
             LoginResponse response = JsonUtility.FromJson<LoginResponse>(request.downloadHandler.text);
 
+            string cognitoUserId = CognitoTokenUtils.GetCognitoUsername(response.AuthenticationResult.IdToken);
+            if (string.IsNullOrEmpty(cognitoUserId)) cognitoUserId = USERNAME;
+
             // Guardamos el IdToken, AccessToken, Username y RefreshToken en PlayerPrefs (Persistencia)
             PlayerPrefs.SetString("CognitoIdToken", response.AuthenticationResult.IdToken);
             PlayerPrefs.SetString("CognitoAccessToken", response.AuthenticationResult.AccessToken);
             PlayerPrefs.SetString("CognitoUsername", USERNAME);
+            PlayerPrefs.SetString("CognitoUserId", cognitoUserId);
             PlayerPrefs.SetString("CognitoRefreshToken", response.AuthenticationResult.RefreshToken);
             PlayerPrefs.Save();
 
@@ -273,6 +277,8 @@ public class LoginController : MonoBehaviour
         {
             LoginResponse response = JsonUtility.FromJson<LoginResponse>(request.downloadHandler.text);
             PlayerPrefs.SetString("CognitoIdToken", response.AuthenticationResult.IdToken);
+            string cognitoUserId = CognitoTokenUtils.GetCognitoUsername(response.AuthenticationResult.IdToken);
+            if (!string.IsNullOrEmpty(cognitoUserId)) PlayerPrefs.SetString("CognitoUserId", cognitoUserId);
             PlayerPrefs.Save();
             Debug.Log("Token renovado con Exito.");
         }
@@ -304,6 +310,7 @@ public void Logout()
         PlayerPrefs.DeleteKey("CognitoIdToken");
         PlayerPrefs.DeleteKey("CognitoAccessToken");
         PlayerPrefs.DeleteKey("CognitoUsername");
+        PlayerPrefs.DeleteKey("CognitoUserId");
         PlayerPrefs.DeleteKey("CognitoRefreshToken");
         
         // 2. NUEVO: Limpiar la caché interna del SDK de AWS

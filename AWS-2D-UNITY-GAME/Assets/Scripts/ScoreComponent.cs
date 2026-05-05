@@ -63,6 +63,13 @@ public class ScoreComponent : MonoBehaviour
         //UpdateTimeText(totalTimeAccumulated);
     }
 
+    public void ApplyCloudStats(int loadedScore, float loadedTime)
+    {
+        cloudScore = loadedScore;
+        cloudTime = loadedTime;
+        dataLoaded = true;
+    }
+
     private void OnDestroy()
     {
         if (playerJump != null)

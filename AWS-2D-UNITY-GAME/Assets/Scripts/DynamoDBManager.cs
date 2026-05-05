@@ -124,7 +124,7 @@ public class DynamoDBManager : MonoBehaviour
     public void SaveGameData(int score, float timePlayed)
     {
         string idToken  = PlayerPrefs.GetString("CognitoIdToken");
-        string username = PlayerPrefs.GetString("CognitoUsername", "UnknownUser");
+        string userId   = GetPlayerStatsUserId(idToken);
 
         if (string.IsNullOrEmpty(idToken)) return;
         if (_ddbClient == null) InitClient(idToken);
@@ -135,7 +135,7 @@ public class DynamoDBManager : MonoBehaviour
             TableName = TableName,
             Key = new Dictionary<string, AttributeValue>
             {
-                { "UserId", new AttributeValue { S = username } }
+                { "UserId", new AttributeValue { S = userId } }
             },
             UpdateExpression =
                 "SET Score = :s, TimePlayed = :t, IPAddress = :ip, LastUpdated = :lu",
@@ -177,7 +177,7 @@ public class DynamoDBManager : MonoBehaviour
     public void LoadData(Action<int, float> onLoadedCallback)
     {
         string idToken  = PlayerPrefs.GetString("CognitoIdToken");
-        string username = PlayerPrefs.GetString("CognitoUsername", "UnknownUser");
+        string userId   = GetPlayerStatsUserId(idToken);
 
         if (string.IsNullOrEmpty(idToken)) return;
         if (_ddbClient == null) InitClient(idToken);
@@ -185,12 +185,18 @@ public class DynamoDBManager : MonoBehaviour
         var request = new GetItemRequest
         {
             TableName = TableName,
-            Key = new Dictionary<string, AttributeValue> { { "UserId", new AttributeValue { S = username } } }
+            Key = new Dictionary<string, AttributeValue> { { "UserId", new AttributeValue { S = userId } } }
         };
 
         _ddbClient.GetItemAsync(request, (result) =>
         {
-            if (result.Exception == null && result.Response.Item.Count > 0)
+            if (result.Exception != null)
+            {
+                Debug.LogError("Error cargando DynamoDB: " + result.Exception.Message);
+                return;
+            }
+
+            if (result.Response != null && result.Response.Item != null && result.Response.Item.Count > 0)
             {
                 var item = result.Response.Item;
                 int loadedScore = 0;
@@ -205,10 +211,26 @@ public class DynamoDBManager : MonoBehaviour
             }
             else
             {
-                Debug.Log("Usuario nuevo o error de carga.");
+                Debug.Log("Usuario nuevo: no hay datos persistidos en DynamoDB.");
                 onLoadedCallback?.Invoke(0, 0f);
             }
         });
+    }
+
+    private string GetPlayerStatsUserId(string idToken)
+    {
+        string userId = PlayerPrefs.GetString("CognitoUserId", "");
+        if (!string.IsNullOrEmpty(userId)) return userId;
+
+        userId = CognitoTokenUtils.GetCognitoUsername(idToken);
+        if (!string.IsNullOrEmpty(userId))
+        {
+            PlayerPrefs.SetString("CognitoUserId", userId);
+            PlayerPrefs.Save();
+            return userId;
+        }
+
+        return PlayerPrefs.GetString("CognitoUsername", "UnknownUser");
     }
 
     public void SignOutAWS()
@@ -259,7 +281,7 @@ public class DynamoDBManager : MonoBehaviour
         onNonceReady?.Invoke(null);
     }
 
-    public void VerifyDataAtStartup(string envelopeJson, Action onVerificationDone)
+    public void VerifyDataAtStartup(string envelopeJson, Action onVerificationDone, Action<int, float> onForceCloud = null)
     {
         string idToken = PlayerPrefs.GetString("CognitoIdToken");
         if (string.IsNullOrEmpty(idToken))
@@ -279,16 +301,22 @@ public class DynamoDBManager : MonoBehaviour
             }
 
             // Paso 2: meter nonce + sessionToken en el sobre y enviar verify
-            SecurePayload payload = JsonUtility.FromJson<SecurePayload>(envelopeJson);
+            bool emptyEnvelope = string.IsNullOrEmpty(envelopeJson) || envelopeJson.Trim().Length == 0;
+            SecurePayload payload = emptyEnvelope
+                ? new SecurePayload()
+                : JsonUtility.FromJson<SecurePayload>(envelopeJson);
+            if (payload == null) payload = new SecurePayload();
+            if (payload.data == null) payload.data = "";
+            if (payload.signature == null) payload.signature = "";
             payload.sessionToken  = _currentSessionToken;
             payload.nonce         = nonce;
 
             string finalPayload = JsonUtility.ToJson(payload);
-            StartCoroutine(SendVerifyRequest(finalPayload, idToken, onVerificationDone));
+            StartCoroutine(SendVerifyRequest(finalPayload, idToken, onVerificationDone, onForceCloud));
         }));
     }
 
-    private IEnumerator SendVerifyRequest(string jsonPayload, string token, Action onVerificationDone)
+    private IEnumerator SendVerifyRequest(string jsonPayload, string token, Action onVerificationDone, Action<int, float> onForceCloud)
     {
         byte[] bodyRaw = Encoding.UTF8.GetBytes(jsonPayload);
 
@@ -321,7 +349,11 @@ public class DynamoDBManager : MonoBehaviour
                 }
                 else if (response.code == "PERMANENT_BANNED") Debug.LogError("Cuenta baneada permanentemente.");
                 else if (response.code == "CHEAT_WARNING")    Debug.LogError("Aviso de trampa: stats reseteadas.");
-                else if (response.code == "FORCE_CLOUD")      Debug.Log("Archivo local desactualizado, se usa la nube.");
+                else if (response.code == "FORCE_CLOUD")
+                {
+                    Debug.Log($"Archivo local ausente/desactualizado. Usando nube: Score {response.cloudScore} | Tiempo {response.cloudTime}");
+                    onForceCloud?.Invoke(response.cloudScore, response.cloudTime);
+                }
                 else if (response.code == "NONCE_INVALID")    Debug.LogError("Nonce inválido o caducado.");
                 else                                          Debug.Log("Datos verificados.");
             }
@@ -404,6 +436,8 @@ public class LambdaResponse
 {
     public string code;
     public string message;
+    public int cloudScore;
+    public float cloudTime;
 }
 
 [Serializable]
