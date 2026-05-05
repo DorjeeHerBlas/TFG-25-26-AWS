@@ -5,8 +5,10 @@ using UnityEngine.InputSystem;
 [RequireComponent(typeof(Rigidbody2D))]
 public class JumpComponent : MonoBehaviour
 {
-    public float jumpForce = 5f;
+    public float jumpForce = 10f;
     public bool isGrounded = true;
+    [SerializeField]
+    private Animator animator;
 
     public event Action OnJump;
 
@@ -22,14 +24,16 @@ public class JumpComponent : MonoBehaviour
         {
             rb.AddForce(Vector2.up * jumpForce, ForceMode2D.Impulse);
             isGrounded = false;
-
+            animator.SetBool("isGrounded", isGrounded);
             OnJump?.Invoke(); // salto real
         }
     }
 
     private void OnCollisionEnter2D(Collision2D collision)
     {
-        if (collision.gameObject.CompareTag("Ground"))
+        if (collision.gameObject.CompareTag("Ground")){
             isGrounded = true;
+            animator.SetBool("isGrounded", isGrounded);
+        } 
     }
 }
