@@ -28,6 +28,7 @@ public class SessionTelemetryRecorder : MonoBehaviour
     public class SessionTelemetry
     {
         public string sessionId;
+        public string userId;
         public string startedAtUtc;
         public string lastSavedAtUtc;
         public float  timePlayedSeconds;
@@ -54,6 +55,7 @@ public class SessionTelemetryRecorder : MonoBehaviour
         };
 
         if (dbManager == null) dbManager = DynamoDBManager.Instance;
+        data.userId = GetCurrentUserId();
 
         if (DynamoDBManager.Instance != null)
         {
@@ -88,6 +90,12 @@ public class SessionTelemetryRecorder : MonoBehaviour
 
     private void VerifyStartupData(string envelopeJson)
     {
+        if (!IsLocalSaveForCurrentUser(envelopeJson))
+        {
+            Debug.Log("No hay save local valido para esta cuenta. Forzando nube.");
+            envelopeJson = "";
+        }
+
         bool forceCloudApplied = false;
         DynamoDBManager.Instance.VerifyDataAtStartup(
             envelopeJson,
@@ -106,6 +114,7 @@ public class SessionTelemetryRecorder : MonoBehaviour
     private void ApplyCloudStats(int puntosNube, float tiempoNube)
     {
         float elapsedThisSession = Mathf.Max(0f, Time.realtimeSinceStartup - startRealtime);
+        data.userId = GetCurrentUserId();
         data.score = puntosNube;
         data.timePlayedSeconds = tiempoNube + elapsedThisSession;
 
@@ -127,6 +136,27 @@ public class SessionTelemetryRecorder : MonoBehaviour
 
         Array.Sort(files);
         return files[files.Length - 1];
+    }
+
+    private bool IsLocalSaveForCurrentUser(string envelopeJson)
+    {
+        if (string.IsNullOrEmpty(envelopeJson) || envelopeJson.Trim().Length == 0) return false;
+
+        try
+        {
+            SecurePayload envelope = JsonUtility.FromJson<SecurePayload>(envelopeJson);
+            if (envelope == null || string.IsNullOrEmpty(envelope.data)) return false;
+
+            SessionTelemetry localData = JsonUtility.FromJson<SessionTelemetry>(envelope.data);
+            if (localData == null || string.IsNullOrEmpty(localData.userId)) return false;
+
+            return localData.userId == GetCurrentUserId();
+        }
+        catch (Exception e)
+        {
+            Debug.LogWarning("Save local ilegible. Forzando nube: " + e.Message);
+            return false;
+        }
     }
 
     void OnDestroy()
@@ -209,6 +239,7 @@ public class SessionTelemetryRecorder : MonoBehaviour
     // ===== GUARDADO EN DISCO (FUNCIONA EN BUILD) =====
     public void SaveToDisk(bool saveCloud = true)
     {
+        data.userId = GetCurrentUserId();
         data.lastSavedAtUtc = DateTime.UtcNow.ToString("o");
 
         string timestamp    = DateTime.Now.ToString("yyyy-MM-dd_HH-mm-ss");
@@ -251,12 +282,44 @@ public class SessionTelemetryRecorder : MonoBehaviour
     public string GetSavePath()
     {
 #if UNITY_EDITOR
-        // En editor, guarda en la raíz del proyecto para verlo cómodo
-        return Path.GetFullPath(Path.Combine(Application.dataPath, ".."));
+        string baseDir = Path.GetFullPath(Path.Combine(Application.dataPath, "..", "session_telemetry"));
 #else
-        // En build, carpeta persistente del usuario
-        return Application.persistentDataPath;
+        string baseDir = Path.Combine(Application.persistentDataPath, "session_telemetry");
 #endif
+        return Path.Combine(baseDir, GetSafeUserFolderName());
+    }
+
+    private string GetCurrentUserId()
+    {
+        if (dbManager != null)
+        {
+            string userId = dbManager.GetCurrentPlayerStatsUserId();
+            if (!string.IsNullOrEmpty(userId)) return userId;
+        }
+
+        string cachedUserId = PlayerPrefs.GetString("CognitoUserId", "");
+        if (!string.IsNullOrEmpty(cachedUserId)) return cachedUserId;
+
+        return PlayerPrefs.GetString("CognitoUsername", "UnknownUser");
+    }
+
+    private string GetSafeUserFolderName()
+    {
+        string userId = GetCurrentUserId();
+        if (string.IsNullOrEmpty(userId)) userId = "UnknownUser";
+
+        char[] chars = userId.ToCharArray();
+        char[] invalidChars = Path.GetInvalidFileNameChars();
+
+        for (int i = 0; i < chars.Length; i++)
+        {
+            if (Array.IndexOf(invalidChars, chars[i]) >= 0)
+            {
+                chars[i] = '_';
+            }
+        }
+
+        return new string(chars);
     }
 
     public SessionTelemetry GetCurrentSnapshot()

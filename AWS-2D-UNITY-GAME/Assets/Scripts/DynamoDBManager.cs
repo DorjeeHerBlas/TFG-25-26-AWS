@@ -217,6 +217,12 @@ public class DynamoDBManager : MonoBehaviour
         });
     }
 
+    public string GetCurrentPlayerStatsUserId()
+    {
+        string idToken = PlayerPrefs.GetString("CognitoIdToken");
+        return GetPlayerStatsUserId(idToken);
+    }
+
     private string GetPlayerStatsUserId(string idToken)
     {
         string userId = PlayerPrefs.GetString("CognitoUserId", "");
