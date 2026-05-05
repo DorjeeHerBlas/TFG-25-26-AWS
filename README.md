@@ -13,13 +13,6 @@ The system is constructed using an **Amazon Web Services (AWS)** serverless stac
 ### Authorship and Direction
 This Final Degree Project (TFG) was developed at the **Universidad Complutense de Madrid** by authors **Alberto Peñalba Martos** and **Dorje Khampa Herrezuelo Blasco**, under the direction of **José Luis Vázquez Poletti** and **David Pacios Izquierdo**.
 ---
-
-# Korrekturen die wir vornehmen müssen
-Tecnologías utilizadas: hablar menos de AWS y de sus servicios en general y dejar más centrada la exposición en las decisiones que realmente utiliza el prototipo.
-Borrar y releer lo que queda de capítulo (IAC).
-
-La revisión final debería hacerse también con foco en grafías oficiales de herramientas y servicios, porque aquí un detalle pequeño sí da imagen de falta de pulido.
-Revisar acrónimos y definir si no están.
-Revisar cursivas y ttt.
-menos webs más artículos académicos
+# WEB LINK
+https://dorjeeherblas.github.io/Presigned-URL-AWS-UNITYGAME/
 
