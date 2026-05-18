@@ -1,0 +1,76 @@
+import json
+import os
+import boto3
+from botocore.config import Config
+
+REGION = "eu-north-1"
+EXPIRATION = 300  # URL prefirmada valida durante 5 minutos.
+
+s3_client = boto3.client(
+    "s3",
+    region_name=REGION,
+    endpoint_url=f"https://s3.{REGION}.amazonaws.com",
+    config=Config(
+        signature_version="s3v4",
+        s3={"addressing_style": "virtual"}
+    )
+)
+
+# Un bucket por plataforma: el ejecutable de cada SO se mantiene aislado.
+BUCKETS = {
+    "mac": os.environ["BUCKET_MAC"],
+    "windows": os.environ["BUCKET_WINDOWS"]
+}
+
+def response(status, body):
+    return {
+        "statusCode": status,
+        "headers": {
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Headers": "Content-Type,Authorization",
+            "Access-Control-Allow-Methods": "GET,OPTIONS"
+        },
+        "body": json.dumps(body)
+    }
+
+def lambda_handler(event, context):
+    try:
+        if event.get("httpMethod") == "OPTIONS":
+            return response(200, {})
+
+        params = event.get("queryStringParameters") or {}
+        platform = (params.get("platform") or "").lower()
+
+        if platform not in BUCKETS:
+            return response(400, {"error": "Usa platform=mac o platform=windows"})
+
+        bucket = BUCKETS[platform]
+
+        files = s3_client.list_objects_v2(Bucket=bucket).get("Contents", [])
+        zip_files = [obj for obj in files if obj["Key"].lower().endswith(".zip")]
+
+        if not zip_files:
+            return response(404, {"error": f"No hay .zip en {bucket}"})
+
+        selected = max(zip_files, key=lambda obj: obj["LastModified"])
+        key = selected["Key"]
+
+        # descarga directamente de S3 sin que
+        # Lambda toque los bytes ni exponga credenciales del bucket.
+        url = s3_client.generate_presigned_url(
+            "get_object",
+            Params={"Bucket": bucket, "Key": key},
+            ExpiresIn=EXPIRATION
+        )
+
+        print("Presigned URL:", url)
+
+        return response(200, {
+            "downloadUrl": url,
+            "fileName": key,
+            "platform": platform
+        })
+
+    except Exception as e:
+        print("ERROR:", str(e))
+        return response(500, {"error": str(e)})

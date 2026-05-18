@@ -1,0 +1,280 @@
+import json
+import boto3
+import uuid
+import time
+from decimal import Decimal
+from botocore.exceptions import ClientError
+
+dynamodb = boto3.resource('dynamodb')
+table    = dynamodb.Table('PlayerStats')
+nonces   = dynamodb.Table('SessionNonces')
+cognito  = boto3.client('cognito-idp')
+
+USER_POOL_ID      = 'eu-north-1_o4xSSQGiK'
+NONCE_TTL_SECONDS = 60
+
+
+def lambda_handler(event, context):
+    path = event.get('rawPath') or event.get('path', '')
+    if path.endswith('/request-nonce'):
+        return handle_request_nonce(event)
+    elif path.endswith('/verify-stats'):
+        return handle_verify_stats(event)
+    else:
+        return api_response(404, 'NOT_FOUND', 'Ruta desconocida.')
+
+
+def handle_request_nonce(event):
+    try:
+        user_id = event['requestContext']['authorizer']['claims']['cognito:username']
+    except (KeyError, TypeError):
+        return api_response(401, 'UNAUTHORIZED', 'Token Cognito invalido o ausente.')
+
+    nonce_value = str(uuid.uuid4())
+    expires_at  = int(time.time()) + NONCE_TTL_SECONDS
+
+    try:
+        nonces.put_item(Item={
+            'nonce':     nonce_value,
+            'userId':    user_id,
+            'expiresAt': expires_at,
+            'used':      False,
+        })
+    except Exception as e:
+        print(f"request_nonce: error escribiendo nonce: {e}")
+        return api_response(500, 'ERROR', 'No se pudo emitir nonce.')
+
+    return api_response(200, 'OK', 'Nonce emitido.', extra={'nonce': nonce_value})
+
+
+def handle_verify_stats(event):
+    try:
+        user_id = event['requestContext']['authorizer']['claims']['cognito:username']
+        body    = json.loads(event['body'])
+
+        raw_json_string      = body.get('data', '')
+        client_session_token = body.get('sessionToken', '')
+        client_nonce         = body.get('nonce', '')
+
+        #Validar nonce
+        if not consume_nonce(client_nonce, user_id):
+            return api_response(400, 'NONCE_INVALID', 'Solicitud rechazada.')
+
+        #obten y lee registro del jugador
+        response = table.get_item(Key={'UserId': user_id})
+        item     = response.get('Item')
+
+        # usuario nuevo
+        if not item:
+            return api_response(200, 'NEW_USER', 'Usuario nuevo.')
+
+        print(f"=== ITEM LEIDO: CheaterFlag={item.get('CheaterFlag')} "
+              f"PermanentBan={item.get('PermanentBan')} ===")
+
+        # ban permanente
+        if item.get('PermanentBan', False):
+            revoke_cognito_access(user_id)
+            force_sign_out(user_id)
+            return api_response(403, 'PERMANENT_BANNED', 'Acceso revocado permanentemente.')
+
+        cheater_val = item.get('CheaterFlag', False)
+        is_flagged  = cheater_val is True or str(cheater_val).lower() == 'true'
+
+        # Se valida la sesion activa
+        db_session_token = item.get('ActiveSessionToken', '')
+        if db_session_token and client_session_token != db_session_token:
+            print(f"SESION INVALIDA para {user_id}.")
+            return api_response(200, 'SESSION_EXPIRED',
+                                'Has iniciado sesion en otro dispositivo.')
+
+        # para evitar sesiones zombie, se refresca el token
+        try:
+            table.update_item(
+                Key={'UserId': user_id},
+                UpdateExpression='SET SessionLastSeenAt = :now',
+                ExpressionAttributeValues={':now': int(time.time())}
+            )
+        except Exception as e:
+            print(f"No se pudo refrescar SessionLastSeenAt: {e}")
+
+        # Stats de la dynamodb
+        db_score = int(item.get('Score', 0))
+        db_time  = float(item.get('TimePlayed', 0.0))
+
+        # ¿El cliente envia un JSON valido?
+        telemetry = _parse_local_save(raw_json_string)
+        if telemetry is None:
+            print(f"=== SIN SAVE LOCAL para {user_id}: forzando datos de nube "
+                  f"(db_score={db_score} db_time={db_time:.2f}) ===")
+            return api_response(
+                200, 'FORCE_CLOUD',
+                'Sin save local. Cargar puntuacion desde la nube.',
+                extra={
+                    'cloudScore': db_score,
+                    'cloudTime':  db_time,
+                }
+            )
+
+        # anti-cheats 
+        local_score = int(telemetry.get('score', 0))
+        local_time  = float(telemetry.get('timePlayedSeconds', 0.0))
+
+        print(f"=== SCORES: local={local_score} db={db_score} | "
+              f"TIMES: local={local_time:.2f} db={db_time:.2f} ===")
+
+        # Score local mas bajo que el de la nube, archivo antiguo, usar nube
+        if local_score < db_score:
+            return api_response(200, 'FORCE_CLOUD', 'Partida local antigua.',
+                                extra={'cloudScore': db_score, 'cloudTime': db_time})
+
+        # Diferencia de 0, 1 o 2 puntos, sincronizacion normal
+        if abs(local_score - db_score) <= 2:
+            update_stats(user_id, local_score, local_time)
+            return api_response(200, 'OK', 'Sincronizado.')
+
+        # Cualquier diferencia mayor de 2, trampa
+        diff_score = local_score - db_score
+        diff_time  = local_time  - db_time
+        print(f"=== DIFERENCIA SOSPECHOSA: diff_score={diff_score} "
+              f"diff_time={diff_time:.2f} ===")
+        return handle_cheat_detection(user_id, 'Puntuacion manipulada', is_flagged)
+
+    except Exception as e:
+        print(f"verify_stats error critico: {e}")
+        return api_response(500, 'ERROR', 'Error interno del servidor.')
+
+
+def _parse_local_save(raw):
+    """Devuelve el dict de telemetria si el cliente envio un save local
+    valido, o None si no hay save local (campo ausente, vacio, null, '{}'
+    o JSON ilegible). En ese caso el caller debe forzar carga desde la nube
+    en lugar de asumir score=0."""
+    if raw is None:
+        return None
+    if not isinstance(raw, str):
+        return raw if isinstance(raw, dict) and raw else None
+    s = raw.strip()
+    if s in ('', '{}', 'null'):
+        return None
+    try:
+        parsed = json.loads(s)
+    except (ValueError, TypeError):
+        return None
+    if not isinstance(parsed, dict) or not parsed:
+        return None
+    has_score = 'score' in parsed
+    has_time  = 'timePlayedSeconds' in parsed
+    if not has_score and not has_time:
+        return None
+    return parsed
+
+
+def consume_nonce(nonce_value, user_id):
+    if not nonce_value:
+        return False
+    try:
+        nonces.update_item(
+            Key={'nonce': nonce_value},
+            UpdateExpression='SET #u = :t',
+            ConditionExpression=(
+                'userId = :uid'
+                ' AND #u = :f'
+                ' AND expiresAt > :now'
+            ),
+            ExpressionAttributeNames={'#u': 'used'},
+            ExpressionAttributeValues={
+                ':uid': user_id,
+                ':f':   False,
+                ':t':   True,
+                ':now': int(time.time()),
+            },
+            ReturnValues='NONE',
+        )
+        return True
+    except dynamodb.meta.client.exceptions.ConditionalCheckFailedException:
+        print(f"consume_nonce FALLO para user={user_id} nonce={nonce_value}")
+        return False
+    except Exception as e:
+        print(f"consume_nonce error inesperado: {e}")
+        return False
+
+
+def update_stats(user_id, score, time_played):
+    table.update_item(
+        Key={'UserId': user_id},
+        UpdateExpression='SET Score = :s, TimePlayed = :t, SessionLastSeenAt = :now',
+        ExpressionAttributeValues={
+            ':s':   score,
+            ':t':   Decimal(str(time_played)),
+            ':now': int(time.time()),
+        }
+    )
+
+
+def handle_cheat_detection(user_id, motivo, already_flagged=False):
+    if already_flagged:
+        table.update_item(
+            Key={'UserId': user_id},
+            UpdateExpression='SET Score = :z, TimePlayed = :z2, '
+                             'PermanentBan = :t, CheaterFlag = :t',
+            ExpressionAttributeValues={
+                ':z':  Decimal('0'),
+                ':z2': Decimal('0'),
+                ':t':  True,
+            }
+        )
+        revoke_cognito_access(user_id)
+        force_sign_out(user_id)
+        print(f"=== BAN PERMANENTE: {user_id} | Motivo: {motivo} ===")
+        return api_response(403, 'PERMANENT_BANNED', f'Baneo definitivo: {motivo}')
+
+    table.update_item(
+        Key={'UserId': user_id},
+        UpdateExpression='SET Score = :z, TimePlayed = :z2, CheaterFlag = :t',
+        ExpressionAttributeValues={
+            ':z':  Decimal('0'),
+            ':z2': Decimal('0'),
+            ':t':  True,
+        }
+    )
+    print(f"=== CHEAT FLAG: {user_id} | Motivo: {motivo} ===")
+    return api_response(200, 'CHEAT_WARNING', f'Aviso: {motivo}. Stats reseteadas.')
+
+
+def revoke_cognito_access(user_id):
+    """Deshabilita al usuario en Cognito. Evita el coste/rate-limit
+    de llamar admin_disable_user si ya esta deshabilitado."""
+    try:
+        info = cognito.admin_get_user(UserPoolId=USER_POOL_ID, Username=user_id)
+        if not info.get('Enabled', True):
+            return  # ya estaba deshabilitado
+        cognito.admin_disable_user(UserPoolId=USER_POOL_ID, Username=user_id)
+        print(f"Cognito disable OK: {user_id}")
+    except ClientError as e:
+        print(f"Error al desactivar Cognito ({user_id}): {e.response['Error']['Code']}")
+    except Exception as e:
+        print(f"Error al desactivar Cognito ({user_id}): {e}")
+
+
+def force_sign_out(user_id):
+    try:
+        cognito.admin_user_global_sign_out(UserPoolId=USER_POOL_ID, Username=user_id)
+        print(f"Sign-out global OK: {user_id}")
+    except ClientError as e:
+        print(f"Error sign-out ({user_id}): {e.response['Error']['Code']}")
+    except Exception as e:
+        print(f"Error sign-out ({user_id}): {e}")
+
+
+def api_response(status, code, message, extra=None):
+    body = {'code': code, 'message': message}
+    if extra:
+        body.update(extra)
+    return {
+        'statusCode': status,
+        'headers': {
+            'Access-Control-Allow-Origin': '*',
+            'Content-Type': 'application/json',
+        },
+        'body': json.dumps(body),
+    }

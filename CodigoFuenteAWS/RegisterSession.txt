@@ -1,0 +1,111 @@
+import json
+import time
+import boto3
+from botocore.exceptions import ClientError
+
+dynamodb = boto3.resource('dynamodb')
+table    = dynamodb.Table('PlayerStats')
+
+# Tras este tiempo sin heartbeat de SessionLastSeenAt, otra conexion puede
+# tomar el slot. La frescura la mantiene VerifyPlayerStats.
+STALE_SESSION_SECONDS = 10 * 60
+
+
+def lambda_handler(event, context):
+    try:
+        user_id = event['requestContext']['authorizer']['claims']['cognito:username']
+        body    = json.loads(event['body'])
+        action  = body.get('action', 'register')
+
+        if action == 'unregister':
+            return handle_unregister(user_id, body)
+        return handle_register(user_id, body)
+    except Exception as e:
+        print(f"RegisterSession error critico: {e}")
+        return api_response(500, "ERROR", "Error interno del servidor.")
+
+
+def handle_register(user_id, body):
+    new_session_token = body.get('sessionToken')
+    if not new_session_token:
+        return api_response(400, "ERROR", "Falta el token.")
+
+    now          = int(time.time())
+    stale_cutoff = now - STALE_SESSION_SECONDS
+
+    # Check-and-set atomico. NO se acepta "SessionLastSeenAt no existe" como
+    # motivo para tomar el slot: cubria un bug del cliente que borraba el
+    # campo y permitia hijack del slot.
+    try:
+        table.update_item(
+            Key={'UserId': user_id},
+            UpdateExpression=(
+                "SET ActiveSessionToken = :t, "
+                "SessionStartedAt = :now, "
+                "SessionLastSeenAt = :now"
+            ),
+            ConditionExpression=(
+                "attribute_not_exists(ActiveSessionToken) "
+                "OR ActiveSessionToken = :empty "
+                "OR SessionLastSeenAt < :stale"
+            ),
+            ExpressionAttributeValues={
+                ':t':     new_session_token,
+                ':empty': "",
+                ':now':   now,
+                ':stale': stale_cutoff,
+            }
+        )
+    except ClientError as e:
+        if e.response['Error']['Code'] == 'ConditionalCheckFailedException':
+            print(f"INTRUSO BLOQUEADO: {user_id} intento entrar desde otro PC.")
+            return api_response(200, "SESSION_IN_USE",
+                                "Ya hay una partida en curso en otro dispositivo.")
+        print(f"register error: {e}")
+        return api_response(500, "ERROR", "Error interno del servidor.")
+
+    return api_response(200, "OK", "Sesion registrada.")
+
+
+def handle_unregister(user_id, body):
+    client_token = body.get('sessionToken', '')
+
+    # sessionToken obligatorio: sin auth de propiedad no se libera nada.
+    # La red de seguridad para crashes/force-quits es el stale-takeover
+    # de handle_register, no un unregister sin token.
+    if not client_token:
+        print(f"WARNING unregister sin sessionToken (user={user_id}).")
+        return api_response(200, "IGNORED",
+                            "Falta el token de sesion. Se ignora la peticion.")
+
+    try:
+        table.update_item(
+            Key={'UserId': user_id},
+            UpdateExpression="SET ActiveSessionToken = :empty",
+            ConditionExpression="ActiveSessionToken = :t",
+            ExpressionAttributeValues={
+                ':empty': "",
+                ':t':     client_token,
+            }
+        )
+        return api_response(200, "OK", "Cuenta liberada correctamente.")
+
+    except ClientError as e:
+        # Idempotente: si el token no coincide o el slot ya estaba vacio,
+        # no se toca la fila y se responde 200.
+        if e.response['Error']['Code'] == 'ConditionalCheckFailedException':
+            return api_response(200, "ALREADY_FREE",
+                                "El slot ya estaba libre o pertenece a otra sesion.")
+        print(f"unregister error: {e}")
+        return api_response(500, "ERROR", "Error interno del servidor.")
+
+
+def api_response(status, code, message):
+    return {
+        'statusCode': status,
+        'headers': {
+            'Access-Control-Allow-Origin': '*',
+            'Content-Type': 'application/json',
+        },
+        'body': json.dumps({'code': code, 'message': message}),
+    }
