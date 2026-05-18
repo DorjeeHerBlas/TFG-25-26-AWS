@@ -1,0 +1,131 @@
+import { DynamoDBClient, GetItemCommand, UpdateItemCommand } from "@aws-sdk/client-dynamodb";
+
+const client = new DynamoDBClient({});
+
+const TABLE_NAME      = "DemoAccess";
+const DEFAULT_PLAY    = 2 * 60 * 60;   // 2h en segundos
+const DEFAULT_WINDOW  = 24 * 60 * 60;  // ventana de 24h desde primer login
+const MAX_DELTA       = 300;           // tope de delta por llamada (5 min)
+
+export const handler = async (event) => {
+    try {
+        const userId = event?.requestContext?.authorizer?.claims?.sub;
+        if (!userId) {
+            return apiResponse(401, "UNAUTHORIZED", "Token Cognito ausente.");
+        }
+
+        const now = Math.floor(Date.now() / 1000);
+
+        // Lectura del item
+        const result = await client.send(new GetItemCommand({
+            TableName: TABLE_NAME,
+            Key: { userId: { S: userId } }
+        }));
+
+        let item = result.Item;
+
+        // Primer login: creamos el item con valores por defecto
+        if (!item) {
+            const expiration = now + DEFAULT_WINDOW;
+
+            await client.send(new UpdateItemCommand({
+                TableName: TABLE_NAME,
+                Key: { userId: { S: userId } },
+                UpdateExpression:
+                    "SET playTimeSeconds = :p, usedSeconds = :u, " +
+                    "lastCheckEpoch = :l, expirationEpoch = :e, firstLoginEpoch = :f",
+                ExpressionAttributeValues: {
+                    ":p": { N: DEFAULT_PLAY.toString() },
+                    ":u": { N: "0" },
+                    ":l": { N: now.toString() },
+                    ":e": { N: expiration.toString() },
+                    ":f": { N: now.toString() }
+                }
+            }));
+
+            item = {
+                playTimeSeconds: { N: DEFAULT_PLAY.toString() },
+                usedSeconds:     { N: "0" },
+                lastCheckEpoch:  { N: now.toString() },
+                expirationEpoch: { N: expiration.toString() },
+                firstLoginEpoch: { N: now.toString() }
+            };
+        }
+
+        // Caso fecha fija
+        if (item.expirationEpoch) {
+            const exp = parseInt(item.expirationEpoch.N, 10);
+            if (now > exp) {
+                console.log(`Date expired: ${now} > ${exp} (user=${userId})`);
+                return apiResponse(403, "EXPIRED", "Demo caducada por fecha.");
+            }
+        }
+
+        // Tiempo acumulado
+        if (item.playTimeSeconds) {
+            const used  = item.usedSeconds    ? parseInt(item.usedSeconds.N, 10)    : 0;
+            const last  = item.lastCheckEpoch ? parseInt(item.lastCheckEpoch.N, 10) : now;
+            const limit = parseInt(item.playTimeSeconds.N, 10);
+
+            // ARREGLO CLAVE: en vez de descartar deltas grandes (que permitia
+            // jugar infinitamente esperando >5 min entre llamadas), capamos
+            // el delta a MAX_DELTA. Asi un gap razonable cuenta sus 5 min y
+            // un gap absurdo (horas) tambien cuenta solo 5 min.
+            let delta = now - last;
+            if (delta < 0)         delta = 0;          // proteccion contra reloj raro
+            if (delta > MAX_DELTA) delta = MAX_DELTA;
+
+            const newUsed = used + delta;
+
+            if (newUsed >= limit) {
+                console.log(`Time limit reached: ${newUsed} > ${limit} (user=${userId})`);
+                // Persistimos el contador final aun denegando, para que el
+                // siguiente intento siga viendo el limite alcanzado.
+                await client.send(new UpdateItemCommand({
+                    TableName: TABLE_NAME,
+                    Key: { userId: { S: userId } },
+                    UpdateExpression: "SET usedSeconds = :u, lastCheckEpoch = :l",
+                    ExpressionAttributeValues: {
+                        ":u": { N: newUsed.toString() },
+                        ":l": { N: now.toString() }
+                    }
+                }));
+                return apiResponse(403, "TIME_LIMIT_REACHED",
+                                   "Tiempo de demo agotado.");
+            }
+
+            await client.send(new UpdateItemCommand({
+                TableName: TABLE_NAME,
+                Key: { userId: { S: userId } },
+                UpdateExpression: "SET usedSeconds = :u, lastCheckEpoch = :l",
+                ExpressionAttributeValues: {
+                    ":u": { N: newUsed.toString() },
+                    ":l": { N: now.toString() }
+                }
+            }));
+
+            return apiResponse(200, "OK", "Acceso permitido.", {
+                allowed: true,
+                usedSeconds:  newUsed,
+                limitSeconds: limit
+            });
+        }
+        
+        return apiResponse(200, "OK", "Acceso permitido.", { allowed: true });
+
+    } catch (err) {
+        console.error("CheckDemoStatus error:", err);
+        return apiResponse(500, "ERROR", "Error interno del servidor.");
+    }
+};
+
+function apiResponse(statusCode, code, message, extra = {}) {
+    return {
+        statusCode,
+        headers: {
+            "Access-Control-Allow-Origin": "*",
+            "Content-Type": "application/json"
+        },
+        body: JSON.stringify({ code, message, ...extra })
+    };
+}

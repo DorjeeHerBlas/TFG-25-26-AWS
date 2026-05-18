@@ -1,0 +1,61 @@
+import { DynamoDBClient, GetItemCommand } from "@aws-sdk/client-dynamodb";
+
+const client     = new DynamoDBClient({});
+const TABLE_NAME = "HistoricExeHashes";
+
+export const handler = async (event) => {
+    try {
+        let body;
+        try {
+            body = event.body ? JSON.parse(event.body) : event;
+        } catch (err) {
+            return apiResponse(400, "INVALID_JSON", "JSON invalido.");
+        }
+
+        const clientHash = body?.clientHash?.toLowerCase();
+        if (!clientHash) {
+            return apiResponse(400, "MISSING_HASH", "clientHash requerido.");
+        }
+
+        // Logueamos solo los primeros 12 chars del hash: suficiente para
+        // identificar la build sin spamear los logs.
+        const shortHash = clientHash.slice(0, 12);
+        console.log(`VerifyGameHash: user-hash=${shortHash}...`);
+
+        const result = await client.send(new GetItemCommand({
+            TableName: TABLE_NAME,
+            Key: { clientHash: { S: clientHash } }
+        }));
+
+        if (!result.Item) {
+            console.log(`DENIED hash=${shortHash}... (no esta registrado)`);
+            return apiResponse(403, "DENIED",
+                               "Esta version no esta autorizada.");
+        }
+
+        // Acceso defensivo: si por algun motivo el item no tiene isCurrent,
+        // tratamos como UPDATE_REQUIRED en vez de petar.
+        const isCurrent = result.Item.isCurrent?.BOOL === true;
+        if (isCurrent) {
+            return apiResponse(200, "OK", "Version actual.");
+        }
+
+        return apiResponse(426, "UPDATE_REQUIRED",
+                           "Tu version no es la mas reciente, actualiza el juego.");
+
+    } catch (err) {
+        console.error("VerifyGameHash error:", err);
+        return apiResponse(500, "ERROR", "Error interno del servidor.");
+    }
+};
+
+function apiResponse(statusCode, code, message, extra = {}) {
+    return {
+        statusCode,
+        headers: {
+            "Access-Control-Allow-Origin": "*",
+            "Content-Type": "application/json"
+        },
+        body: JSON.stringify({ code, message, ...extra })
+    };
+}
